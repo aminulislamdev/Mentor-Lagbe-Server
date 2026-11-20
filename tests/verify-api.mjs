@@ -97,6 +97,7 @@ const TEST_EMAILS = [
   "verify.tutor1@mentorlagbe.com",
   "verify.tutor2@mentorlagbe.com",
   "verify.admin@mentorlagbe.com",
+  "verify.student2@mentorlagbe.com",
 ];
 
 async function cleanup() {
@@ -110,23 +111,26 @@ async function cleanup() {
 await cleanup(); // start from a clean slate even if a previous run died
 
 const people = [
-  { email: TEST_EMAILS[0], name: "Verify Student", role: "student" },
-  { email: TEST_EMAILS[1], name: "Verify Tutor One", role: "tutor" },
-  { email: TEST_EMAILS[2], name: "Verify Tutor Two", role: "tutor" },
-  { email: TEST_EMAILS[3], name: "Verify Admin", role: "admin" },
+  { as: "student", email: TEST_EMAILS[0], name: "Verify Student", role: "student" },
+  { as: "student2", email: TEST_EMAILS[4], name: "Verify Student Two", role: "student" },
+  { as: "tutor1", email: TEST_EMAILS[1], name: "Verify Tutor One", role: "tutor" },
+  { as: "tutor2", email: TEST_EMAILS[2], name: "Verify Tutor Two", role: "tutor" },
+  { as: "admin", email: TEST_EMAILS[3], name: "Verify Admin", role: "admin" },
 ];
 
 const docs = {};
 for (const person of people) {
   const doc = {
-    ...person,
+    name: person.name,
+    email: person.email,
+    role: person.role,
     plan: "free",
     emailVerified: true,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
   const { insertedId } = await users.insertOne(doc);
-  docs[person.role === "tutor" ? person.email : person.role] = { _id: insertedId, ...doc };
+  docs[person.as] = { _id: insertedId, ...doc };
 }
 
 function signToken(
@@ -144,8 +148,9 @@ function signToken(
 }
 
 const student = await signToken(docs.student);
-const tutor1 = await signToken(docs[TEST_EMAILS[1]]);
-const tutor2 = await signToken(docs[TEST_EMAILS[2]]);
+const student2 = await signToken(docs.student2);
+const tutor1 = await signToken(docs.tutor1);
+const tutor2 = await signToken(docs.tutor2);
 const admin = await signToken(docs.admin);
 
 // ── 3. Request helper ───────────────────────────────────────────────────────
@@ -611,10 +616,36 @@ try {
     assert.equal(body.data[0]._id, application1);
   });
 
+  await check("another student sees none of it", async () => {
+    const { status, body } = await api("/api/applications/student", { token: student2 });
+    assert.equal(status, 200);
+    assert.equal(body.data.length, 0);
+  });
+
+  await check("another student cannot cancel someone else's application (403)", async () => {
+    const { status } = await api(`/api/applications/${application1}`, {
+      method: "DELETE",
+      token: student2,
+    });
+    assert.equal(status, 403);
+  });
+
   await check("the owning tutor sees it", async () => {
     const { status, body } = await api("/api/applications/tutor", { token: tutor1 });
     assert.equal(status, 200);
     assert.equal(body.data.length, 1);
+  });
+
+  await check("?tuitionId narrows the tutor's applicant list", async () => {
+    const mine = await api(`/api/applications/tutor?tuitionId=${tuition1}`, { token: tutor1 });
+    assert.equal(mine.status, 200);
+    assert.equal(mine.body.data.length, 1);
+
+    const other = await api(`/api/applications/tutor?tuitionId=${tuition2}`, { token: tutor1 });
+    assert.equal(other.body.data.length, 0);
+
+    const invalid = await api("/api/applications/tutor?tuitionId=nope", { token: tutor1 });
+    assert.equal(invalid.status, 400);
   });
 
   await check("another tutor sees none of it", async () => {
@@ -659,6 +690,35 @@ try {
     assert.equal(status, 409);
   });
 
+  await check("the tutor can change a decision after the fact (200)", async () => {
+    const { status, body } = await api(`/api/applications/${application1}/status`, {
+      method: "PATCH",
+      token: tutor1,
+      body: { status: "rejected" },
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data.status, "rejected");
+  });
+
+  await check("re-sending the same decision is a harmless no-op", async () => {
+    const { status, body } = await api(`/api/applications/${application1}/status`, {
+      method: "PATCH",
+      token: tutor1,
+      body: { status: "rejected" },
+    });
+    assert.equal(status, 200);
+    assert.match(body.message, /already rejected/);
+  });
+
+  await check("a rejected application can be submitted again (201)", async () => {
+    const { status } = await api("/api/applications", {
+      method: "POST",
+      token: student,
+      body: applicationBody(tuition1),
+    });
+    assert.equal(status, 201);
+  });
+
   await check("a student cannot decide applications (403)", async () => {
     const { status } = await api(`/api/applications/${application1}/status`, {
       method: "PATCH",
@@ -690,6 +750,22 @@ try {
       token: student,
     });
     assert.equal(removed.status, 200);
+  });
+
+  await check("an application keeps its snapshot after the tuition changes", async () => {
+    const patched = await api(`/api/tuitions/${tuition1}`, {
+      method: "PATCH",
+      token: tutor1,
+      body: { monthlyFee: 7777 },
+    });
+    assert.equal(patched.status, 200);
+
+    const publicView = await api(`/api/tuitions/${tuition1}`);
+    assert.equal(publicView.body.data.monthlyFee, 7777);
+
+    const { body } = await api("/api/applications/student", { token: student });
+    const original = body.data.find((a) => a._id === application1);
+    assert.equal(original.monthlyFee, 4200); // the fee at apply time, not 7777
   });
 
   // ── Fee filters + sort ────────────────────────────────────────────────────
@@ -777,12 +853,30 @@ try {
     assert.equal(body.success, false);
   });
 
+  await check("a second student can apply to the second listing", async () => {
+    const { status } = await api("/api/applications", {
+      method: "POST",
+      token: student2,
+      body: applicationBody(tuition2),
+    });
+    assert.equal(status, 201);
+  });
+
   await check("the owner can delete their listing (200)", async () => {
     const { status } = await api(`/api/tuitions/${tuition2}`, {
       method: "DELETE",
       token: tutor1,
     });
     assert.equal(status, 200);
+  });
+
+  await check("deleting a tuition leaves the application readable", async () => {
+    const { body } = await api("/api/applications/student", { token: student2 });
+    const orphan = body.data.find((a) => a.tuitionId === tuition2);
+
+    assert.ok(orphan, "the application should survive the deletion");
+    assert.equal(orphan.tuitionTitle, "Verification IELTS Batch");
+    assert.equal(orphan.status, "pending");
   });
 
   await check("a deleted listing is gone (404)", async () => {

@@ -135,6 +135,13 @@ ObjectId, or whose user no longer exists, is rejected as well.
 - **Snapshots** — an application stores `tuitionTitle`, `subject`, `monthlyFee`
   and `tutorEmail` at submit time, so the student's ledger stays intact if the
   tutor edits or deletes the listing.
+- **Decision changes** — a tutor may switch an application between `accepted` and
+  `rejected` at any time; re-sending the current status is a no-op success, so a
+  double click cannot produce an error.
+- **Deleted listings** — applications are kept, not cascaded, so a student never
+  loses their history and a tutor can still see who had applied.
+- **No pagination on applications** — each list belongs to one user and stays
+  small; pagination lives on the public tuitions list.
 - **Roles** — read from MongoDB on every request, never from the JWT.
 
 ---
