@@ -43,7 +43,9 @@ export async function authMiddleware(req, res, next) {
 
   // Read the role from MongoDB on every request, so a role change (or a deleted
   // account) takes effect immediately instead of living on inside the token.
-  const dbUser = await User.findById(userId).select("_id name email role image");
+  // `plan` must be selected too: the tuition routes use req.dbUser.plan to
+  // enforce the free-plan listing limit.
+  const dbUser = await User.findById(userId).select("_id name email role image plan");
 
   if (!dbUser) {
     return next(new ApiError(401, "Unauthorized: User not found"));
