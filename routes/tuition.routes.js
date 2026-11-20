@@ -1,5 +1,7 @@
 import express from "express";
 import Tuition from "../models/tuition.model.js";
+import User from "../models/user.model.js";
+import { authMiddleware, verifyTutor } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
@@ -140,5 +142,154 @@ router.get("/:id", async (req, res) => {
     });
   }
 });
+
+// POST /api/tuitions
+// Protected endpoint for tutors to create a new tuition post.
+// Only authenticated tutors can create tuition.
+// Free plan tutors can have a maximum of 2 active tuition posts.
+//
+// Body parameters:
+//   title         - Tuition title (required)
+//   subject       - Subject name (required)
+//   classLevel    - Class level (required)
+//   mode          - "Online" or "Offline" (required)
+//   location      - Location (required)
+//   monthlyFee    - Monthly fee (required, number)
+//   daysPerWeek   - Days per week (required, number)
+//   bannerImage   - Banner image URL (required)
+//   description   - Tuition description (required)
+//
+// Fields set automatically (NOT from frontend):
+//   tutorName     - From authenticated user's name
+//   tutorEmail    - From authenticated user's email
+//   approvalStatus - Always "pending"
+//   isActive      - Always true
+router.post(
+  "/",
+  authMiddleware,
+  verifyTutor,
+  async (req, res) => {
+    try {
+      // --- Get authenticated tutor info from database (source of truth) ---
+      // Never trust tutor ID or role sent by the frontend.
+      const tutorId = req.userId; // from JWT payload
+      const tutorName = req.dbUser.name;
+      const tutorEmail = req.dbUser.email;
+      const tutorPlan = req.dbUser.plan;
+
+      // --- Extract and validate required body fields ---
+      const {
+        title,
+        subject,
+        classLevel,
+        mode,
+        location,
+        monthlyFee,
+        daysPerWeek,
+        bannerImage,
+        description,
+      } = req.body;
+
+      const missingFields = [];
+      if (!title) missingFields.push("title");
+      if (!subject) missingFields.push("subject");
+      if (!classLevel) missingFields.push("classLevel");
+      if (!mode) missingFields.push("mode");
+      if (!location) missingFields.push("location");
+      if (monthlyFee === undefined || monthlyFee === null)
+        missingFields.push("monthlyFee");
+      if (daysPerWeek === undefined || daysPerWeek === null)
+        missingFields.push("daysPerWeek");
+      if (!bannerImage) missingFields.push("bannerImage");
+      if (!description) missingFields.push("description");
+
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required fields",
+          missingFields,
+        });
+      }
+
+      // --- Validate mode value ---
+      const normalizedMode =
+        mode.charAt(0).toUpperCase() + mode.slice(1).toLowerCase();
+      if (normalizedMode !== "Online" && normalizedMode !== "Offline") {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid mode. Must be "Online" or "Offline".',
+        });
+      }
+
+      // --- Validate numeric fields ---
+      const monthlyFeeNum = Number(monthlyFee);
+      const daysPerWeekNum = Number(daysPerWeek);
+
+      if (isNaN(monthlyFeeNum) || monthlyFeeNum < 0) {
+        return res.status(400).json({
+          success: false,
+          error: "monthlyFee must be a non-negative number",
+        });
+      }
+      if (isNaN(daysPerWeekNum) || daysPerWeekNum < 1 || daysPerWeekNum > 7) {
+        return res.status(400).json({
+          success: false,
+          error: "daysPerWeek must be a number between 1 and 7",
+        });
+      }
+
+      // --- Free Plan Limit Check ---
+      // Free plan tutors can have a maximum of 2 active tuition posts.
+      // Check subscription details from the database (not from frontend).
+      if (tutorPlan === "free") {
+        const activeTuitionCount = await Tuition.countDocuments({
+          tutorEmail,
+          isActive: true,
+        });
+
+        if (activeTuitionCount >= 2) {
+          return res.status(403).json({
+            success: false,
+            error:
+              "Free plan limit reached: You can have a maximum of 2 active tuition posts. Upgrade to Pro to post more.",
+          });
+        }
+      }
+
+      // --- Create tuition document ---
+      // Prevent frontend from setting approvalStatus, tutorName, or tutorEmail.
+      // approvalStatus always starts as "pending" (awaits admin approval).
+      // isActive is true by default.
+      const newTuition = await Tuition.create({
+        title: title.trim(),
+        subject: subject.trim(),
+        classLevel: classLevel.trim(),
+        mode: normalizedMode,
+        location: location.trim(),
+        monthlyFee: monthlyFeeNum,
+        daysPerWeek: daysPerWeekNum,
+        bannerImage: bannerImage.trim(),
+        description: description.trim(),
+        tutorName: tutorName.trim(),
+        tutorEmail: tutorEmail.trim(),
+        // approvalStatus defaults to "pending" in schema
+        // isActive defaults to true in schema
+        // createdAt and updatedAt handled by timestamps
+      });
+
+      res.status(201).json({
+        success: true,
+        message: "Tuition created successfully. It is pending admin approval.",
+        data: newTuition,
+      });
+    } catch (error) {
+      console.error("Error creating tuition:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+      });
+    }
+  }
+);
 
 export default router;
