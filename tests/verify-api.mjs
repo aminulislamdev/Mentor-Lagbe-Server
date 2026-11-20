@@ -424,6 +424,30 @@ try {
     assert.equal(status, 404);
   });
 
+  await check("the owner can read their own pending listing (200)", async () => {
+    const { status, body } = await api(`/api/tuitions/${tuition1}`, { token: tutor1 });
+    assert.equal(status, 200);
+    assert.equal(body.data._id, tuition1);
+    assert.equal(body.data.approvalStatus, "pending");
+  });
+
+  await check("another tutor still cannot read it (404)", async () => {
+    const { status } = await api(`/api/tuitions/${tuition1}`, { token: tutor2 });
+    assert.equal(status, 404);
+  });
+
+  await check("a student still cannot read it (404)", async () => {
+    const { status } = await api(`/api/tuitions/${tuition1}`, { token: student });
+    assert.equal(status, 404);
+  });
+
+  await check("an unusable token does not break the public read (404 not 401)", async () => {
+    const { status } = await api(`/api/tuitions/${tuition1}`, {
+      token: "garbage.token.value",
+    });
+    assert.equal(status, 404);
+  });
+
   await check("GET /api/tuitions/mine shows it to its owner", async () => {
     const { status, body } = await api("/api/tuitions/mine", { token: tutor1 });
     assert.equal(status, 200);
@@ -495,6 +519,8 @@ try {
     });
     assert.equal(off.status, 200);
     assert.equal((await api(`/api/tuitions/${tuition1}`)).status, 404);
+    // ...but the owner can still open it while it is closed, to reopen or edit it
+    assert.equal((await api(`/api/tuitions/${tuition1}`, { token: tutor1 })).status, 200);
 
     const on = await api(`/api/tuitions/${tuition1}`, {
       method: "PATCH",
