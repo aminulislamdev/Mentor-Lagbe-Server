@@ -26,9 +26,12 @@ MentorLagbe-Server/
 ├─ config/db.js              # Mongoose connection (pinned to MONGODB_DB)
 ├─ middleware/auth.middleware.js  # authMiddleware, verifyStudent, verifyTutor, verifyAdmin
 ├─ models/                   # users, tuitions, applications, payments
-├─ routes/                   # auth, tuition, application (+ admin, payments: pending)
-├─ utils/                    # jwt (JWKS verify), respond (shared envelope)
+├─ routes/                   # auth, users, tuition, applications, admin, dashboard, upload
+├─ utils/                    # jwt (JWKS verify), respond (success envelope), validate, ApiError
+├─ middleware/               # verifyToken + role guards, central error handler
+├─ tests/                    # unit tests + end-to-end sweep + ImgBB stub
 ├─ API.md                    # the endpoint contract — read this first
+├─ SECURITY.md               # security review and hardening checklist
 └─ .env.example              # required variables
 ```
 
@@ -36,12 +39,22 @@ MentorLagbe-Server/
 
 ```bash
 npm install
-cp .env.example .env        # then fill in MONGODB_URI
+cp .env.example .env        # then fill in MONGODB_URI (+ IMGBB_API_KEY for uploads)
 npm run dev                 # nodemon on http://localhost:8000
 npm start                   # production
+
+npm test                    # unit tests, no database needed
+npm run verify              # full API sweep against a running server
 ```
 
 Health check: `GET http://localhost:8000/api/health`
+
+## Security
+
+`SECURITY.md` is the review: how tokens are verified, how ownership and roles are
+enforced, what is closed (mass assignment, NoSQL/regex injection, pagination
+abuse, upload limits) and what is still recommended before a public launch
+(rate limiting, helmet, least-privilege database user).
 
 ## Environment variables
 
