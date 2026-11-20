@@ -6,7 +6,9 @@ const router = express.Router();
 
 // Normalize mode to "Online" or "Offline"; returns null if invalid
 function normalizeMode(mode) {
-  const normalized = mode.charAt(0).toUpperCase() + mode.slice(1).toLowerCase();
+  if (typeof mode !== "string" || !mode.trim()) return null;
+  const trimmed = mode.trim();
+  const normalized = trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
   return normalized === "Online" || normalized === "Offline" ? normalized : null;
 }
 
@@ -14,15 +16,22 @@ function normalizeMode(mode) {
 router.get("/", async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.max(parseInt(req.query.limit, 10) || 10, 1);
+    // Cap the page size so a large ?limit= cannot dump the whole collection.
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
     const search = req.query.search ? String(req.query.search).trim() : "";
     const subject = req.query.subject ? String(req.query.subject).trim() : "";
-    const classLevel = req.query.class ? String(req.query.class).trim() : "";
+    // Accept both the documented ?classLevel= and the shorter ?class= alias.
+    const classLevel = String(req.query.classLevel ?? req.query.class ?? "").trim();
     const mode = req.query.mode ? String(req.query.mode).trim() : "";
 
     const filter = { approvalStatus: "approved", isActive: true };
 
-    if (search) filter.title = { $regex: search, $options: "i" };
+    // Challenge 1: the term matches the title OR the subject. The pattern is
+    // escaped so user input can never be interpreted as regex syntax.
+    if (search) {
+      const pattern = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      filter.$or = [{ title: pattern }, { subject: pattern }];
+    }
     if (subject) filter.subject = subject;
     if (classLevel) filter.classLevel = classLevel;
 
@@ -48,6 +57,21 @@ router.get("/", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching tuitions:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// GET /api/tuitions/mine — Tutor's own listings, including pending/rejected/closed
+// NOTE: declared before "/:id", otherwise Express reads "mine" as an ObjectId.
+router.get("/mine", authMiddleware, verifyTutor, async (req, res) => {
+  try {
+    const tuitions = await Tuition.find({ tutorEmail: req.dbUser.email })
+      .select("-__v")
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: tuitions });
+  } catch (error) {
+    console.error("Error fetching own tuitions:", error);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
@@ -235,6 +259,16 @@ router.patch("/:id", authMiddleware, verifyTutor, async (req, res) => {
         return res.status(400).json({ success: false, error: "description must be a non-empty string" });
       }
       updateFields.description = req.body.description.trim();
+    }
+
+    // Active/Closed toggle. Only a boolean is accepted, and approvalStatus is
+    // deliberately NOT updatable here — moderation belongs to the admin routes,
+    // otherwise a tutor could silently re-approve their own listing.
+    if (req.body.isActive !== undefined) {
+      if (typeof req.body.isActive !== "boolean") {
+        return res.status(400).json({ success: false, error: "isActive must be a boolean" });
+      }
+      updateFields.isActive = req.body.isActive;
     }
 
     if (Object.keys(updateFields).length === 0) {
