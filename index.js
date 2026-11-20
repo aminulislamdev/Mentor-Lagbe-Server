@@ -14,8 +14,17 @@ import dashboardRoutes from "./routes/dashboard.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js";
 
+// cors() defaults to "*" when the origin is undefined, which would silently open
+// the API to every site. Fall back to the dev origin and say so out loud instead.
+const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
+if (!process.env.CLIENT_URL) {
+  console.warn("⚠️  CLIENT_URL is not set — CORS is limited to", CLIENT_URL);
+}
+
 const app = express();
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+// Do not advertise the framework in every response.
+app.disable("x-powered-by");
+app.use(cors({ origin: CLIENT_URL, credentials: true }));
 app.use(express.json());
 
 // home route

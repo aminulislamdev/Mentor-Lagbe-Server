@@ -75,7 +75,7 @@ router.patch("/users/:id/role", async (req, res) => {
   const user = await User.findByIdAndUpdate(
     req.params.id,
     { $set: { role } },
-    { new: true }
+    { returnDocument: "after" }
   ).select("name email role plan");
 
   if (!user) {
@@ -143,7 +143,7 @@ router.patch("/tuitions/:id/status", async (req, res) => {
   const tuition = await Tuition.findByIdAndUpdate(
     req.params.id,
     { $set: { approvalStatus } },
-    { new: true }
+    { returnDocument: "after" }
   ).select("-__v");
 
   if (!tuition) {

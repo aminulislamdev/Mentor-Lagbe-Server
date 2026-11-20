@@ -253,7 +253,7 @@ router.patch("/:id", verifyToken, verifyTutor, async (req, res) => {
   const updatedTuition = await Tuition.findByIdAndUpdate(
     req.params.id,
     { $set: updateFields },
-    { new: true, runValidators: true }
+    { returnDocument: "after", runValidators: true }
   ).select("-__v");
 
   okWithMessage(res, "Tuition updated successfully", updatedTuition);

@@ -58,7 +58,7 @@ router.patch("/me", verifyToken, async (req, res) => {
   const user = await User.findByIdAndUpdate(
     req.userId,
     { $set: updateFields },
-    { new: true, runValidators: true }
+    { returnDocument: "after", runValidators: true }
   ).select("name email role plan image phone bio createdAt");
 
   if (!user) {
