@@ -46,6 +46,11 @@ Failures are classified in exactly one place, `middleware/error.middleware.js`:
 Routes therefore never build error responses by hand, and never need `try/catch`:
 Express 5 forwards a rejected async handler straight to the handler.
 
+Input rules live in `utils/validate.js` — `requireFields`, `requireString`,
+`requireNumberInRange`, `requireOneOf`, `isObjectId`. They throw 400s whose body
+names the offending field (or `missingFields` for a whole-body check), so a
+malformed request never reaches the database.
+
 ---
 
 ## 2. Authentication

@@ -6,7 +6,8 @@ import {
   verifyStudent,
   verifyTutor,
 } from "../middleware/auth.middleware.js";
-import { ok, okWithMessage, isObjectId } from "../utils/respond.js";
+import { ok, okWithMessage } from "../utils/respond.js";
+import { isObjectId, requireString, requireOneOf } from "../utils/validate.js";
 import { ApiError } from "../utils/ApiError.js";
 
 const router = express.Router();
@@ -30,13 +31,8 @@ router.post("/", authMiddleware, verifyStudent, async (req, res) => {
     throw new ApiError(400, "Invalid tuitionId format");
   }
 
-  if (typeof studentPhone !== "string" || studentPhone.trim().length < 6) {
-    throw new ApiError(400, "studentPhone is required (at least 6 characters)");
-  }
-
-  if (typeof preferredSchedule !== "string" || !preferredSchedule.trim()) {
-    throw new ApiError(400, "preferredSchedule is required");
-  }
+  const phone = requireString(studentPhone, "studentPhone", { minLength: 6 });
+  const schedule = requireString(preferredSchedule, "preferredSchedule");
 
   if (studentNote !== undefined && typeof studentNote !== "string") {
     throw new ApiError(400, "studentNote must be a string");
@@ -74,8 +70,8 @@ router.post("/", authMiddleware, verifyStudent, async (req, res) => {
     tutorEmail: tuition.tutorEmail,
     studentName: req.dbUser.name,
     studentEmail,
-    studentPhone: studentPhone.trim(),
-    preferredSchedule: preferredSchedule.trim(),
+    studentPhone: phone,
+    preferredSchedule: schedule,
     studentNote: (studentNote ?? "").trim(),
     status: "pending",
   });
@@ -132,11 +128,7 @@ router.get("/tutor", authMiddleware, verifyTutor, async (req, res) => {
  * status is treated as a no-op success so the UI can retry safely.
  */
 router.patch("/:id/status", authMiddleware, verifyTutor, async (req, res) => {
-  const { status } = req.body ?? {};
-
-  if (!TUTOR_DECISIONS.includes(status)) {
-    throw new ApiError(400, 'status must be either "accepted" or "rejected"');
-  }
+  const decision = requireOneOf((req.body ?? {}).status, "status", TUTOR_DECISIONS);
 
   if (!isObjectId(req.params.id)) {
     throw new ApiError(400, "Invalid application ID format");
@@ -152,14 +144,14 @@ router.patch("/:id/status", authMiddleware, verifyTutor, async (req, res) => {
     throw new ApiError(403, "Forbidden: You do not own this application");
   }
 
-  if (application.status === status) {
-    return okWithMessage(res, `Application is already ${status}`, application);
+  if (application.status === decision) {
+    return okWithMessage(res, `Application is already ${decision}`, application);
   }
 
-  application.status = status;
+  application.status = decision;
   await application.save();
 
-  okWithMessage(res, `Application ${status}`, application);
+  okWithMessage(res, `Application ${decision}`, application);
 });
 
 /**

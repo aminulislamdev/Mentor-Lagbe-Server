@@ -1,10 +1,21 @@
 import express from "express";
 import Tuition from "../models/tuition.model.js";
 import { authMiddleware, verifyTutor } from "../middleware/auth.middleware.js";
-import { ok, okWithMessage, isObjectId } from "../utils/respond.js";
+import { ok, okWithMessage } from "../utils/respond.js";
+import {
+  isObjectId,
+  requireFields,
+  requireString,
+  requireNumberInRange,
+} from "../utils/validate.js";
 import { ApiError } from "../utils/ApiError.js";
 
 const router = express.Router();
+
+const REQUIRED_FIELDS = [
+  "title", "subject", "classLevel", "mode", "location",
+  "monthlyFee", "daysPerWeek", "bannerImage", "description",
+];
 
 // Normalize mode to "Online" or "Offline"; returns null if invalid
 function normalizeMode(mode) {
@@ -12,6 +23,53 @@ function normalizeMode(mode) {
   const trimmed = mode.trim();
   const normalized = trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
   return normalized === "Online" || normalized === "Offline" ? normalized : null;
+}
+
+// Reads and validates the optional fields of a PATCH body.
+// Only fields present in the request are copied, so a tutor can never touch
+// tutorEmail or approvalStatus — moderation belongs to the admin routes.
+function buildUpdateFields(body) {
+  const updateFields = {};
+
+  if (body.title !== undefined) updateFields.title = requireString(body.title, "title");
+  if (body.subject !== undefined) updateFields.subject = requireString(body.subject, "subject");
+  if (body.classLevel !== undefined) {
+    updateFields.classLevel = requireString(body.classLevel, "classLevel");
+  }
+  if (body.location !== undefined) updateFields.location = requireString(body.location, "location");
+  if (body.bannerImage !== undefined) {
+    updateFields.bannerImage = requireString(body.bannerImage, "bannerImage");
+  }
+  if (body.description !== undefined) {
+    updateFields.description = requireString(body.description, "description");
+  }
+
+  if (body.mode !== undefined) {
+    const mode = normalizeMode(body.mode);
+    if (!mode) throw new ApiError(400, 'Invalid mode. Must be "Online" or "Offline".');
+    updateFields.mode = mode;
+  }
+
+  if (body.monthlyFee !== undefined) {
+    updateFields.monthlyFee = requireNumberInRange(body.monthlyFee, "monthlyFee", { min: 0 });
+  }
+
+  if (body.daysPerWeek !== undefined) {
+    updateFields.daysPerWeek = requireNumberInRange(body.daysPerWeek, "daysPerWeek", {
+      min: 1,
+      max: 7,
+    });
+  }
+
+  // Active/Closed toggle.
+  if (body.isActive !== undefined) {
+    if (typeof body.isActive !== "boolean") {
+      throw new ApiError(400, "isActive must be a boolean");
+    }
+    updateFields.isActive = body.isActive;
+  }
+
+  return updateFields;
 }
 
 // GET /api/tuitions — Public list with filters and pagination
@@ -92,36 +150,19 @@ router.post("/", authMiddleware, verifyTutor, async (req, res) => {
   const body = req.body ?? {};
   const tutorName = req.dbUser.name;
   const tutorEmail = req.dbUser.email;
-  const tutorPlan = req.dbUser.plan;
 
-  // Required field validation (simple loop)
-  const requiredFields = [
-    "title", "subject", "classLevel", "mode", "location",
-    "monthlyFee", "daysPerWeek", "bannerImage", "description",
-  ];
-  const missingFields = requiredFields.filter((f) => !body[f]);
-
-  if (missingFields.length > 0) {
-    throw new ApiError(400, "Missing required fields", { missingFields });
-  }
+  requireFields(body, REQUIRED_FIELDS);
 
   const normalizedMode = normalizeMode(body.mode);
   if (!normalizedMode) {
     throw new ApiError(400, 'Invalid mode. Must be "Online" or "Offline".');
   }
 
-  const monthlyFeeNum = Number(body.monthlyFee);
-  const daysPerWeekNum = Number(body.daysPerWeek);
-
-  if (isNaN(monthlyFeeNum) || monthlyFeeNum < 0) {
-    throw new ApiError(400, "monthlyFee must be a non-negative number");
-  }
-  if (isNaN(daysPerWeekNum) || daysPerWeekNum < 1 || daysPerWeekNum > 7) {
-    throw new ApiError(400, "daysPerWeek must be a number between 1 and 7");
-  }
+  const monthlyFee = requireNumberInRange(body.monthlyFee, "monthlyFee", { min: 0 });
+  const daysPerWeek = requireNumberInRange(body.daysPerWeek, "daysPerWeek", { min: 1, max: 7 });
 
   // Free plan limit check
-  if (tutorPlan === "free") {
+  if (req.dbUser.plan === "free") {
     const activeTuitionCount = await Tuition.countDocuments({ tutorEmail, isActive: true });
     if (activeTuitionCount >= 2) {
       throw new ApiError(
@@ -132,15 +173,15 @@ router.post("/", authMiddleware, verifyTutor, async (req, res) => {
   }
 
   const newTuition = await Tuition.create({
-    title: body.title.trim(),
-    subject: body.subject.trim(),
-    classLevel: body.classLevel.trim(),
+    title: requireString(body.title, "title"),
+    subject: requireString(body.subject, "subject"),
+    classLevel: requireString(body.classLevel, "classLevel"),
     mode: normalizedMode,
-    location: body.location.trim(),
-    monthlyFee: monthlyFeeNum,
-    daysPerWeek: daysPerWeekNum,
-    bannerImage: body.bannerImage.trim(),
-    description: body.description.trim(),
+    location: requireString(body.location, "location"),
+    monthlyFee,
+    daysPerWeek,
+    bannerImage: requireString(body.bannerImage, "bannerImage"),
+    description: requireString(body.description, "description"),
     tutorName: tutorName.trim(),
     tutorEmail: tutorEmail.trim(),
   });
@@ -168,84 +209,7 @@ router.patch("/:id", authMiddleware, verifyTutor, async (req, res) => {
     throw new ApiError(403, "Forbidden: You do not own this tuition");
   }
 
-  const body = req.body ?? {};
-  const updateFields = {};
-
-  if (body.title !== undefined) {
-    if (typeof body.title !== "string" || !body.title.trim()) {
-      throw new ApiError(400, "title must be a non-empty string");
-    }
-    updateFields.title = body.title.trim();
-  }
-
-  if (body.subject !== undefined) {
-    if (typeof body.subject !== "string" || !body.subject.trim()) {
-      throw new ApiError(400, "subject must be a non-empty string");
-    }
-    updateFields.subject = body.subject.trim();
-  }
-
-  if (body.classLevel !== undefined) {
-    if (typeof body.classLevel !== "string" || !body.classLevel.trim()) {
-      throw new ApiError(400, "classLevel must be a non-empty string");
-    }
-    updateFields.classLevel = body.classLevel.trim();
-  }
-
-  if (body.mode !== undefined) {
-    const normalizedMode = normalizeMode(body.mode);
-    if (!normalizedMode) {
-      throw new ApiError(400, 'Invalid mode. Must be "Online" or "Offline".');
-    }
-    updateFields.mode = normalizedMode;
-  }
-
-  if (body.location !== undefined) {
-    if (typeof body.location !== "string" || !body.location.trim()) {
-      throw new ApiError(400, "location must be a non-empty string");
-    }
-    updateFields.location = body.location.trim();
-  }
-
-  if (body.monthlyFee !== undefined) {
-    const monthlyFeeNum = Number(body.monthlyFee);
-    if (isNaN(monthlyFeeNum) || monthlyFeeNum < 0) {
-      throw new ApiError(400, "monthlyFee must be a non-negative number");
-    }
-    updateFields.monthlyFee = monthlyFeeNum;
-  }
-
-  if (body.daysPerWeek !== undefined) {
-    const daysPerWeekNum = Number(body.daysPerWeek);
-    if (isNaN(daysPerWeekNum) || daysPerWeekNum < 1 || daysPerWeekNum > 7) {
-      throw new ApiError(400, "daysPerWeek must be a number between 1 and 7");
-    }
-    updateFields.daysPerWeek = daysPerWeekNum;
-  }
-
-  if (body.bannerImage !== undefined) {
-    if (typeof body.bannerImage !== "string" || !body.bannerImage.trim()) {
-      throw new ApiError(400, "bannerImage must be a non-empty string");
-    }
-    updateFields.bannerImage = body.bannerImage.trim();
-  }
-
-  if (body.description !== undefined) {
-    if (typeof body.description !== "string" || !body.description.trim()) {
-      throw new ApiError(400, "description must be a non-empty string");
-    }
-    updateFields.description = body.description.trim();
-  }
-
-  // Active/Closed toggle. Only a boolean is accepted, and approvalStatus is
-  // deliberately NOT updatable here — moderation belongs to the admin routes,
-  // otherwise a tutor could silently re-approve their own listing.
-  if (body.isActive !== undefined) {
-    if (typeof body.isActive !== "boolean") {
-      throw new ApiError(400, "isActive must be a boolean");
-    }
-    updateFields.isActive = body.isActive;
-  }
+  const updateFields = buildUpdateFields(req.body ?? {});
 
   if (Object.keys(updateFields).length === 0) {
     throw new ApiError(400, "No valid fields provided to update");
