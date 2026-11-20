@@ -8,6 +8,8 @@ import {
   requireString,
   requireNumberInRange,
   requireOneOf,
+  searchPattern,
+  parsePagination,
 } from "../utils/validate.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -82,9 +84,7 @@ function buildUpdateFields(body) {
 
 // GET /api/tuitions — Public list with filters and pagination
 router.get("/", async (req, res) => {
-  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-  // Cap the page size so a large ?limit= cannot dump the whole collection.
-  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+  const { page, limit, skip } = parsePagination(req.query);
   const search = req.query.search ? String(req.query.search).trim() : "";
   const subject = req.query.subject ? String(req.query.subject).trim() : "";
   // Accept both the documented ?classLevel= and the shorter ?class= alias.
@@ -93,10 +93,9 @@ router.get("/", async (req, res) => {
 
   const filter = { approvalStatus: "approved", isActive: true };
 
-  // Challenge 1: the term matches the title OR the subject. The pattern is
-  // escaped so user input can never be interpreted as regex syntax.
+  // Challenge 1: the term matches the title OR the subject.
   if (search) {
-    const pattern = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const pattern = searchPattern(search);
     filter.$or = [{ title: pattern }, { subject: pattern }];
   }
   if (subject) filter.subject = subject;
@@ -130,7 +129,7 @@ router.get("/", async (req, res) => {
   const tuitions = await Tuition.find(filter)
     .select("-__v")
     .sort(SORT_OPTIONS[sortKey])
-    .skip((page - 1) * limit)
+    .skip(skip)
     .limit(limit);
 
   res.json({

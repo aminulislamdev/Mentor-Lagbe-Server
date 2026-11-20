@@ -95,3 +95,29 @@ export function requireOneOf(value, field, allowed) {
 
   return value;
 }
+
+/**
+ * Case-insensitive "contains" pattern for a search term.
+ * The term is escaped first, so user input can never be read as regex syntax
+ * (which would allow both broken queries and very slow patterns).
+ * @param {unknown} term
+ * @returns {RegExp}
+ */
+export function searchPattern(term) {
+  const escaped = String(term).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped, "i");
+}
+
+/**
+ * Turns ?page= and ?limit= into safe numbers, with a hard ceiling so a single
+ * request can never dump a whole collection.
+ * @param {Record<string, unknown>} query
+ * @param {{ defaultLimit?: number, maxLimit?: number }} [options]
+ * @returns {{ page: number, limit: number, skip: number }}
+ */
+export function parsePagination(query = {}, { defaultLimit = 10, maxLimit = 50 } = {}) {
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || defaultLimit, 1), maxLimit);
+
+  return { page, limit, skip: (page - 1) * limit };
+}
