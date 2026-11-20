@@ -135,9 +135,19 @@ ObjectId, or whose user no longer exists, is rejected as well.
 The whole admin router is guarded once with `router.use(verifyToken, verifyAdmin)`,
 so a future route cannot ship unguarded by accident.
 
+### Upload
+
+| Method | Path | Guard | Request | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/api/upload` | any | `multipart/form-data`, file in the `image` field | jpeg/png/webp, max 5 MB; returns `{ url, thumb, deleteUrl }`; the ImgBB key stays on the server |
+
+Errors: 401 without a token · 400 for a missing file, a non-image type or an
+oversized file · 503 when `IMGBB_API_KEY` is not set · 502 when ImgBB itself
+fails. `IMGBB_API_URL` can point at `tests/imgbb-stub.mjs` for local testing.
+
 ### Not built yet
 
-`POST /api/upload` (ImgBB) · `/api/payments/*` and `/api/admin/transactions`
+`/api/payments/*` and `/api/admin/transactions`
 (Stripe checkout, verify, webhook, revenue) — all part of the payment task.
 
 ---

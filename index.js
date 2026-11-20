@@ -11,6 +11,7 @@ import applicationRoutes from "./routes/application.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js";
 
 const app = express();
@@ -44,6 +45,9 @@ app.use("/api/admin", adminRoutes);
 
 // Dashboard statistics, shaped by the caller's role
 app.use("/api/dashboard", dashboardRoutes);
+
+// Image uploads (multipart → ImgBB → hosted URL)
+app.use("/api/upload", uploadRoutes);
 
 // No route matched → JSON 404
 app.use(notFound);

@@ -47,6 +47,17 @@ export function errorHandler(error, req, res, next) {
     return res.status(error.status).json({ success: false, error: error.message });
   }
 
+  // 2b. Upload limits enforced by multer.
+  if (error.name === "MulterError") {
+    return res.status(400).json({
+      success: false,
+      error:
+        error.code === "LIMIT_FILE_SIZE"
+          ? "Image must be 5 MB or smaller"
+          : `Upload failed: ${error.message}`,
+    });
+  }
+
   // 3. Mongoose schema validation (required field, enum, min/max).
   if (error.name === "ValidationError") {
     return res.status(400).json({
