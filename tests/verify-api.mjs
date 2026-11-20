@@ -42,8 +42,8 @@ async function check(label, fn) {
 // same key. That matters because jose caches the JWKS inside the API process:
 // a fresh random key on each run would be rejected until that cache expires.
 // It is a throwaway test key, not a credential.
-function testKeyPair() {
-  const seed = createHash("sha256").update("mentorlagbe-api-verification-key").digest();
+function testKeyPair(seedString) {
+  const seed = createHash("sha256").update(seedString).digest();
   // Standard Ed25519 PKCS#8 wrapper around a 32-byte seed.
   const pkcs8 = Buffer.concat([
     Buffer.from("302e020100300506032b657004220420", "hex"),
@@ -58,9 +58,11 @@ function testKeyPair() {
   };
 }
 
-const { privateJwk, publicJwk } = testKeyPair();
-const privateKey = await importJWK(privateJwk, "EdDSA");
-const jwk = { ...publicJwk, alg: "EdDSA", use: "sig", kid: "verify-key" };
+const mainKeys = testKeyPair("mentorlagbe-api-verification-key");
+const rogueKeys = testKeyPair("mentorlagbe-rogue-key");
+const privateKey = await importJWK(mainKeys.privateJwk, "EdDSA");
+const rogueKey = await importJWK(rogueKeys.privateJwk, "EdDSA");
+const jwk = { ...mainKeys.publicJwk, alg: "EdDSA", use: "sig", kid: "verify-key" };
 
 const jwksServer = http.createServer((req, res) => {
   if (req.url === "/api/auth/jwks") {
@@ -127,25 +129,30 @@ for (const person of people) {
   docs[person.role === "tutor" ? person.email : person.role] = { _id: insertedId, ...doc };
 }
 
-const tokenFor = (user) =>
-  new SignJWT({ role: user.role })
+function signToken(
+  user,
+  { key = privateKey, issuer = ISSUER, audience = AUDIENCE, expiresIn = "1h", subject } = {}
+) {
+  return new SignJWT({ role: user.role })
     .setProtectedHeader({ alg: "EdDSA", kid: "verify-key" })
-    .setSubject(String(user._id))
-    .setIssuer(ISSUER)
-    .setAudience(AUDIENCE)
+    .setSubject(subject ?? String(user._id))
+    .setIssuer(issuer)
+    .setAudience(audience)
     .setIssuedAt()
-    .setExpirationTime("1h")
-    .sign(privateKey);
+    .setExpirationTime(expiresIn)
+    .sign(key);
+}
 
-const student = await tokenFor(docs.student);
-const tutor1 = await tokenFor(docs[TEST_EMAILS[1]]);
-const tutor2 = await tokenFor(docs[TEST_EMAILS[2]]);
-const admin = await tokenFor(docs.admin);
+const student = await signToken(docs.student);
+const tutor1 = await signToken(docs[TEST_EMAILS[1]]);
+const tutor2 = await signToken(docs[TEST_EMAILS[2]]);
+const admin = await signToken(docs.admin);
 
 // ── 3. Request helper ───────────────────────────────────────────────────────
-async function api(path, { method = "GET", token, body } = {}) {
+async function api(path, { method = "GET", token, body, authHeader } = {}) {
   const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (authHeader !== undefined) headers.Authorization = authHeader;
+  else if (token) headers.Authorization = `Bearer ${token}`;
   if (body) headers["Content-Type"] = "application/json";
 
   const res = await fetch(`${API}${path}`, {
@@ -209,6 +216,68 @@ try {
     const { status, body } = await api("/api/auth/me");
     assert.equal(status, 401);
     assert.equal(body.success, false);
+  });
+
+  // ── Auth hardening matrix ─────────────────────────────────────────────────
+  await check("an Authorization header without the Bearer scheme → 401", async () => {
+    const { status } = await api("/api/auth/me", { authHeader: "Token abc.def.ghi" });
+    assert.equal(status, 401);
+  });
+
+  await check("an empty Bearer value → 401", async () => {
+    const { status } = await api("/api/auth/me", { authHeader: "Bearer " });
+    assert.equal(status, 401);
+  });
+
+  await check("a token signed by another key → 401", async () => {
+    const forged = await signToken(docs.student, { key: rogueKey });
+    const { status } = await api("/api/auth/me", { token: forged });
+    assert.equal(status, 401);
+  });
+
+  await check("an expired token → 401", async () => {
+    const expired = await signToken(docs.student, {
+      expiresIn: Math.floor(Date.now() / 1000) - 60,
+    });
+    const { status, body } = await api("/api/auth/me", { token: expired });
+    assert.equal(status, 401);
+    assert.match(body.error, /expired/);
+  });
+
+  await check("a token from another issuer → 401", async () => {
+    const wrongIssuer = await signToken(docs.student, { issuer: "https://evil.example" });
+    const { status } = await api("/api/auth/me", { token: wrongIssuer });
+    assert.equal(status, 401);
+  });
+
+  await check("a token whose subject is not an ObjectId → 401", async () => {
+    const badSubject = await signToken(docs.student, { subject: "not-an-object-id" });
+    const { status } = await api("/api/auth/me", { token: badSubject });
+    assert.equal(status, 401);
+  });
+
+  await check("a valid token for a deleted user → 401", async () => {
+    const ghost = await signToken({
+      _id: new mongoose.Types.ObjectId(),
+      role: "student",
+    });
+    const { status, body } = await api("/api/auth/me", { token: ghost });
+    assert.equal(status, 401);
+    assert.match(body.error, /User not found/);
+  });
+
+  await check("the role is read from the database, not from the token", async () => {
+    // The token still claims "student"; promote the account and the guard must follow.
+    await users.updateOne({ email: TEST_EMAILS[0] }, { $set: { role: "tutor" } });
+    try {
+      const { status } = await api("/api/applications/student", { token: student });
+      assert.equal(status, 403);
+    } finally {
+      await users.updateOne({ email: TEST_EMAILS[0] }, { $set: { role: "student" } });
+    }
+
+    const restored = await api("/api/applications/student", { token: student });
+    assert.equal(restored.status, 200);
   });
 
   // ── Tuition create + validation ───────────────────────────────────────────
