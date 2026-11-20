@@ -1,6 +1,6 @@
 import express from "express";
 import Tuition from "../models/tuition.model.js";
-import { verifyToken, verifyTutor } from "../middleware/auth.middleware.js";
+import { verifyToken, verifyTutor, optionalAuth } from "../middleware/auth.middleware.js";
 import { ok, okWithMessage } from "../utils/respond.js";
 import {
   isObjectId,
@@ -126,19 +126,26 @@ router.get("/mine", verifyToken, verifyTutor, async (req, res) => {
   ok(res, tuitions);
 });
 
-// GET /api/tuitions/:id — Public single tuition
-router.get("/:id", async (req, res) => {
+// GET /api/tuitions/:id — Public single tuition.
+// The owner also sees their own pending or closed listing, so the tutor's edit
+// screen can load it; everyone else gets approved + active only.
+router.get("/:id", optionalAuth, async (req, res) => {
   if (!isObjectId(req.params.id)) {
     throw new ApiError(400, "Invalid tuition ID format");
   }
 
-  const tuition = await Tuition.findOne({
-    _id: req.params.id,
-    approvalStatus: "approved",
-    isActive: true,
-  }).select("-__v");
+  const tuition = await Tuition.findById(req.params.id).select("-__v");
 
+  // The same 404 whether the listing never existed or is merely not public:
+  // the response must not reveal that a hidden listing exists.
   if (!tuition) {
+    throw new ApiError(404, "Tuition not found or not available");
+  }
+
+  const isPublic = tuition.approvalStatus === "approved" && tuition.isActive === true;
+  const isOwner = Boolean(req.dbUser) && req.dbUser.email === tuition.tutorEmail;
+
+  if (!isPublic && !isOwner) {
     throw new ApiError(404, "Tuition not found or not available");
   }
 

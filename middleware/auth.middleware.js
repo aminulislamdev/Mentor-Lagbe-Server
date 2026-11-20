@@ -63,6 +63,40 @@ export async function verifyToken(req, res, next) {
 }
 
 /**
+ * optionalAuth — for routes that are public but richer when signed in.
+ * -------------------------------------------------------------------
+ * With no token, or an unusable one, the request simply continues anonymously
+ * (so a stale token in a browser can never break a public page). With a valid
+ * token it behaves like verifyToken and attaches req.dbUser.
+ */
+export async function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return next();
+
+  const token = authHeader.slice("Bearer ".length).trim();
+  if (!token) return next();
+
+  try {
+    const payload = await verifyJwt(token);
+    const userId = payload.sub;
+
+    if (typeof userId === "string" && OBJECT_ID.test(userId)) {
+      const dbUser = await User.findById(userId).select("_id name email role image plan");
+      if (dbUser) {
+        req.user = payload;
+        req.userId = userId;
+        req.dbUser = dbUser;
+      }
+    }
+  } catch {
+    // Ignored on purpose: the route stays readable for anonymous visitors.
+  }
+
+  next();
+}
+
+/**
  * verifyStudent / verifyTutor / verifyAdmin
  * ----------------------------------------
  * Role guards that must run after verifyToken. They trust only the current

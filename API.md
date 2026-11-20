@@ -102,7 +102,7 @@ ObjectId, or whose user no longer exists, is rejected as well.
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/api/tuitions` | public | query: `search`, `subject`, `classLevel` (alias `class`), `mode`, `page`, `limit` | only `approvalStatus: "approved"` + `isActive: true`; `search` matches **title or subject**; `limit` capped at 50 |
 | `GET` | `/api/tuitions/mine` | tutor | — | every listing owned by the caller, all approval/active states, newest first |
-| `GET` | `/api/tuitions/:id` | public | — | 404 unless approved **and** active |
+| `GET` | `/api/tuitions/:id` | public (optional token) | — | 404 unless approved **and** active — or the caller owns the listing, in which case any state is visible |
 | `POST` | `/api/tuitions` | tutor | `title, subject, classLevel, mode, location, monthlyFee, daysPerWeek, bannerImage, description` | saved as `pending`; free plan limited to **2 active** listings |
 | `PATCH` | `/api/tuitions/:id` | tutor (owner) | any of the POST fields + `isActive` | `approvalStatus` is **not** writable here; owner only |
 | `DELETE` | `/api/tuitions/:id` | tutor (owner) | — | hard delete |
