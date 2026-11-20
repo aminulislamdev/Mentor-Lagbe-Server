@@ -9,14 +9,12 @@ const JWT_AUDIENCE = process.env.JWT_AUDIENCE || "http://localhost:3000";
 const JWKS = createRemoteJWKSet(new URL(JWKS_URL));
 
 export async function verifyToken(token) {
-  try {
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: JWT_ISSUER,
-      audience: JWT_AUDIENCE,
-    });
-    return payload;
-  } catch (error) {
-    console.error("Token verification failed:", error);
-    throw error;
-  }
+  // Throws if the signature, issuer, audience or expiry is wrong.
+  // authMiddleware turns that into a 401 — no logging here on purpose, a bad
+  // token is a normal client mistake, not a server problem.
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  });
+  return payload;
 }

@@ -33,6 +33,19 @@ A paginated list adds a `pagination` sibling to `data`:
 | 409 | Conflict (duplicate application, cannot cancel a decided application) |
 | 500 | Unhandled server error (message is always generic) |
 
+Failures are classified in exactly one place, `middleware/error.middleware.js`:
+
+| Cause | Result |
+| :--- | :--- |
+| `throw new ApiError(status, message, details?)` in a route | that status, `details` merged into the body |
+| Mongoose validation failed | `400` + `fields: [...]` |
+| value could not be cast (malformed ObjectId) | `400` |
+| duplicate unique key | `409` + `fields: [...]` |
+| anything unclassified | `500`, logged server-side, generic message only |
+
+Routes therefore never build error responses by hand, and never need `try/catch`:
+Express 5 forwards a rejected async handler straight to the handler.
+
 ---
 
 ## 2. Authentication

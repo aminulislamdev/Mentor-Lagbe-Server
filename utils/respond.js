@@ -32,18 +32,6 @@ export function okWithMessage(res, message, data, status = 200) {
 }
 
 /**
- * Error response. `extra` is merged into the body for field-level detail
- * (e.g. { missingFields: [...] }).
- * @param {import("express").Response} res
- * @param {number} status
- * @param {string} error
- * @param {Record<string, unknown>} [extra]
- */
-export function fail(res, status, error, extra = {}) {
-  return res.status(status).json({ success: false, error, ...extra });
-}
-
-/**
  * True only for a 24-character hex string — i.e. a shape MongoDB can cast to
  * an ObjectId. Rejecting malformed ids here keeps CastErrors out of the logs
  * and turns them into clean 400s.

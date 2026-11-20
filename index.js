@@ -8,6 +8,7 @@ import "./config/db.js";
 import authRoutes from "./routes/auth.js";
 import tuitionRoutes from "./routes/tuition.routes.js";
 import applicationRoutes from "./routes/application.routes.js";
+import { notFound, errorHandler } from "./middleware/error.middleware.js";
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
@@ -32,23 +33,11 @@ app.use("/api/tuitions", tuitionRoutes);
 // Application routes (student submits, tutor decides)
 app.use("/api/applications", applicationRoutes);
 
-// Unknown route → JSON 404 instead of Express' default HTML page, so the
-// client's fetch wrapper can always parse the response.
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: `Route not found: ${req.method} ${req.originalUrl}`,
-  });
-});
+// No route matched → JSON 404
+app.use(notFound);
 
-// Central error handler. Express 5 forwards rejected async handlers here,
-// so an unexpected throw still returns the standard error envelope.
-// eslint-disable-next-line no-unused-vars
-app.use((error, req, res, next) => {
-  console.error("Unhandled error:", error);
-  if (res.headersSent) return next(error);
-  res.status(500).json({ success: false, error: "Internal server error" });
-});
+// Every error, from every route, ends up here
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
