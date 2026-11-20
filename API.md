@@ -117,10 +117,28 @@ ObjectId, or whose user no longer exists, is rejected as well.
 | `PATCH` | `/api/applications/:id/status` | tutor (owner) | `status: "accepted" \| "rejected"` | re-sending the current status is a no-op success |
 | `DELETE` | `/api/applications/:id` | student (owner) | — | only while `status === "pending"`; otherwise 409 |
 
+### Dashboard
+
+| Method | Path | Guard | Notes |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/dashboard/stats` | any | counters shaped by the caller's role: student → own applications; tutor → own listings + applicants; admin → users, tuitions, applications. **No revenue** — that arrives with the payments task |
+
+### Admin
+
+| Method | Path | Guard | Request | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/api/admin/users` | admin | `search`, `role`, `page`, `limit` | `search` matches name or email |
+| `PATCH` | `/api/admin/users/:id/role` | admin | `{ role }` | cannot change your **own** role (lock-out guard) |
+| `GET` | `/api/admin/tuitions` | admin | `approvalStatus`, `search`, `page`, `limit` | every state, newest first; `search` matches title, subject or tutor email |
+| `PATCH` | `/api/admin/tuitions/:id/status` | admin | `{ approvalStatus }` | approve, reject, or back to pending |
+
+The whole admin router is guarded once with `router.use(verifyToken, verifyAdmin)`,
+so a future route cannot ship unguarded by accident.
+
 ### Not built yet
 
-`/api/admin/*` (users, moderation, transactions) ·
-`POST /api/upload` (ImgBB) · `/api/payments/*` (Stripe checkout, verify, webhook).
+`POST /api/upload` (ImgBB) · `/api/payments/*` and `/api/admin/transactions`
+(Stripe checkout, verify, webhook, revenue) — all part of the payment task.
 
 ---
 
