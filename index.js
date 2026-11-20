@@ -8,6 +8,7 @@ import "./config/db.js";
 import authRoutes from "./routes/auth.js";
 import tuitionRoutes from "./routes/tuition.routes.js";
 import applicationRoutes from "./routes/application.routes.js";
+import userRoutes from "./routes/user.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js";
 
 const app = express();
@@ -32,6 +33,9 @@ app.use("/api/tuitions", tuitionRoutes);
 
 // Application routes (student submits, tutor decides)
 app.use("/api/applications", applicationRoutes);
+
+// Profile routes (update own account)
+app.use("/api/users", userRoutes);
 
 // No route matched → JSON 404
 app.use(notFound);

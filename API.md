@@ -90,6 +90,12 @@ ObjectId, or whose user no longer exists, is rejected as well.
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/auth/me` | any | `{ user: { id, name, email, role, plan, image, phone, bio, createdAt } }` — the only endpoint using `{ user }` instead of `{ data }` |
 
+### Users
+
+| Method | Path | Guard | Request | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `PATCH` | `/api/users/me` | any | `name?, phone?, bio?, image?` | own account only (id comes from the token, never the URL); `role`, `plan` and `email` are **not** writable; an empty `phone`/`bio`/`image` clears the field; `image` must be an http(s) URL |
+
 ### Tuitions
 
 | Method | Path | Guard | Request | Notes |
@@ -113,7 +119,7 @@ ObjectId, or whose user no longer exists, is rejected as well.
 
 ### Not built yet
 
-`PATCH /api/users/me` (profile) · `/api/admin/*` (users, moderation, transactions) ·
+`/api/admin/*` (users, moderation, transactions) ·
 `POST /api/upload` (ImgBB) · `/api/payments/*` (Stripe checkout, verify, webhook).
 
 ---
