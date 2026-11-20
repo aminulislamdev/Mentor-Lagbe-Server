@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "test": "node --test --test-isolation=none \"tests/*.test.mjs\""
+    "test": "node --test --test-isolation=none \"tests/*.test.mjs\"",
+    "verify": "node tests/verify-api.mjs"
   },
   "keywords": [],
   "author": "",
