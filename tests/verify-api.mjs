@@ -14,7 +14,8 @@
 
 import http from "node:http";
 import assert from "node:assert/strict";
-import { generateKeyPair, exportJWK, SignJWT } from "jose";
+import { createHash, createPrivateKey } from "node:crypto";
+import { importJWK, SignJWT } from "jose";
 import mongoose from "mongoose";
 import "dotenv/config";
 
@@ -36,12 +37,30 @@ async function check(label, fn) {
 }
 
 // ── 1. A stand-in for BetterAuth's JWKS endpoint ────────────────────────────
-const { publicKey, privateKey } = await generateKeyPair("EdDSA", {
-  crv: "Ed25519",
-  extractable: true,
-});
-const jwk = await exportJWK(publicKey);
-Object.assign(jwk, { alg: "EdDSA", use: "sig", kid: "verify-key" });
+//
+// The Ed25519 key is derived from a fixed string, so every run signs with the
+// same key. That matters because jose caches the JWKS inside the API process:
+// a fresh random key on each run would be rejected until that cache expires.
+// It is a throwaway test key, not a credential.
+function testKeyPair() {
+  const seed = createHash("sha256").update("mentorlagbe-api-verification-key").digest();
+  // Standard Ed25519 PKCS#8 wrapper around a 32-byte seed.
+  const pkcs8 = Buffer.concat([
+    Buffer.from("302e020100300506032b657004220420", "hex"),
+    seed,
+  ]);
+  const privateJwk = createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" }).export({
+    format: "jwk",
+  });
+  return {
+    privateJwk,
+    publicJwk: { kty: privateJwk.kty, crv: privateJwk.crv, x: privateJwk.x },
+  };
+}
+
+const { privateJwk, publicJwk } = testKeyPair();
+const privateKey = await importJWK(privateJwk, "EdDSA");
+const jwk = { ...publicJwk, alg: "EdDSA", use: "sig", kid: "verify-key" };
 
 const jwksServer = http.createServer((req, res) => {
   if (req.url === "/api/auth/jwks") {
@@ -53,6 +72,16 @@ const jwksServer = http.createServer((req, res) => {
   res.end();
 });
 await new Promise((resolve) => jwksServer.listen(JWKS_PORT, resolve));
+
+// Fail fast with a useful message when the API is not running, instead of
+// reporting 40 mysterious failures.
+try {
+  const health = await fetch(`${API}/api/health`);
+  if (!health.ok) throw new Error("unhealthy");
+} catch {
+  console.error(`The API is not reachable at ${API}. Start it first:  npm run dev`);
+  process.exit(1);
+}
 
 // ── 2. Test users, tokens ───────────────────────────────────────────────────
 await mongoose.connect(process.env.MONGODB_URI, { dbName: "mentorlagbe" });
@@ -211,6 +240,16 @@ try {
     assert.equal(status, 400);
   });
 
+  await check("POST /api/tuitions rejects daysPerWeek outside 1-7", async () => {
+    const { status, body } = await api("/api/tuitions", {
+      method: "POST",
+      token: tutor1,
+      body: tuitionBody({ daysPerWeek: 9 }),
+    });
+    assert.equal(status, 400);
+    assert.match(body.error, /between 1 and 7/);
+  });
+
   let tuition1;
   await check("POST /api/tuitions creates a pending listing (201)", async () => {
     const { status, body } = await api("/api/tuitions", {
@@ -348,6 +387,16 @@ try {
       body: applicationBody("not-an-id"),
     });
     assert.equal(status, 400);
+  });
+
+  await check("applying with a too-short phone → 400", async () => {
+    const { status, body } = await api("/api/applications", {
+      method: "POST",
+      token: student,
+      body: applicationBody(tuition1, { studentPhone: "123" }),
+    });
+    assert.equal(status, 400);
+    assert.match(body.error, /at least 6 characters/);
   });
 
   let application1;
