@@ -7,6 +7,7 @@ import {
   requireFields,
   requireString,
   requireNumberInRange,
+  requireOneOf,
 } from "../utils/validate.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -16,6 +17,13 @@ const REQUIRED_FIELDS = [
   "title", "subject", "classLevel", "mode", "location",
   "monthlyFee", "daysPerWeek", "bannerImage", "description",
 ];
+
+// Allowed ?sort= values. Each maps to a Mongo sort, newest first as the tiebreak.
+const SORT_OPTIONS = {
+  newest: { createdAt: -1 },
+  fee_asc: { monthlyFee: 1, createdAt: -1 },
+  fee_desc: { monthlyFee: -1, createdAt: -1 },
+};
 
 // Normalize mode to "Online" or "Offline"; returns null if invalid
 function normalizeMode(mode) {
@@ -97,10 +105,31 @@ router.get("/", async (req, res) => {
   const normalizedMode = normalizeMode(mode);
   if (normalizedMode) filter.mode = normalizedMode;
 
+  // Budget range: ?minFee=&maxFee= (either one alone is allowed).
+  const minFee = req.query.minFee ? req.query.minFee : undefined;
+  const maxFee = req.query.maxFee ? req.query.maxFee : undefined;
+  const feeRange = {};
+
+  if (minFee !== undefined) {
+    feeRange.$gte = requireNumberInRange(minFee, "minFee", { min: 0 });
+  }
+  if (maxFee !== undefined) {
+    feeRange.$lte = requireNumberInRange(maxFee, "maxFee", { min: 0 });
+  }
+  if (feeRange.$gte !== undefined && feeRange.$lte !== undefined && feeRange.$gte > feeRange.$lte) {
+    throw new ApiError(400, "maxFee must be greater than or equal to minFee");
+  }
+  if (Object.keys(feeRange).length > 0) filter.monthlyFee = feeRange;
+
+  // ?sort= is optional; anything else is a 400 instead of being silently ignored.
+  const sortKey = req.query.sort
+    ? requireOneOf(String(req.query.sort), "sort", Object.keys(SORT_OPTIONS))
+    : "newest";
+
   const total = await Tuition.countDocuments(filter);
   const tuitions = await Tuition.find(filter)
     .select("-__v")
-    .sort({ createdAt: -1 })
+    .sort(SORT_OPTIONS[sortKey])
     .skip((page - 1) * limit)
     .limit(limit);
 
