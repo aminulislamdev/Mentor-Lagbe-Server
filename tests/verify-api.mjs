@@ -98,6 +98,7 @@ const TEST_EMAILS = [
   "verify.tutor2@mentorlagbe.com",
   "verify.admin@mentorlagbe.com",
   "verify.student2@mentorlagbe.com",
+  "verify.fixtures@mentorlagbe.com",
 ];
 
 async function cleanup() {
@@ -115,6 +116,9 @@ const people = [
   { as: "student2", email: TEST_EMAILS[4], name: "Verify Student Two", role: "student" },
   { as: "tutor1", email: TEST_EMAILS[1], name: "Verify Tutor One", role: "tutor" },
   { as: "tutor2", email: TEST_EMAILS[2], name: "Verify Tutor Two", role: "tutor" },
+  // Owns the fee-range fixtures only, so seeding them cannot push tutor2 over
+  // the free-plan listing limit.
+  { as: "fixtures", email: TEST_EMAILS[5], name: "Verify Fixtures", role: "tutor" },
   { as: "admin", email: TEST_EMAILS[3], name: "Verify Admin", role: "admin" },
 ];
 
@@ -777,8 +781,8 @@ try {
       { title: "Verify Fee High", monthlyFee: 9000 },
     ].map((fixture) => ({
       ...tuitionBody(fixture),
-      tutorEmail: TEST_EMAILS[2],
-      tutorName: "Verify Tutor Two",
+      tutorEmail: TEST_EMAILS[5],
+      tutorName: "Verify Fixtures",
       approvalStatus: "approved",
       isActive: true,
       createdAt: new Date(),
@@ -833,6 +837,175 @@ try {
     const { status, body } = await api("/api/tuitions?minFee=5000&maxFee=1000");
     assert.equal(status, 400);
     assert.match(body.error, /greater than or equal to minFee/);
+  });
+
+  // ── Admin + dashboard stats ───────────────────────────────────────────────
+  await check("a student cannot reach an admin route (403)", async () => {
+    assert.equal((await api("/api/admin/users", { token: student })).status, 403);
+  });
+
+  await check("a tutor cannot reach an admin route (403)", async () => {
+    assert.equal((await api("/api/admin/tuitions", { token: tutor1 })).status, 403);
+  });
+
+  await check("an admin can list users with pagination", async () => {
+    const { status, body } = await api("/api/admin/users?limit=2", { token: admin });
+    assert.equal(status, 200);
+    assert.equal(body.data.length, 2);
+    assert.ok(body.pagination.total >= 5);
+    assert.equal(body.data[0].password, undefined);
+  });
+
+  await check("admin user search matches name or email", async () => {
+    const { body } = await api("/api/admin/users?search=verify.tutor1", { token: admin });
+    assert.equal(body.data.length, 1);
+    assert.equal(body.data[0].email, TEST_EMAILS[1]);
+  });
+
+  await check("admin user list filters by role", async () => {
+    const { body } = await api("/api/admin/users?role=tutor&limit=50", { token: admin });
+    assert.ok(body.data.length >= 2);
+    assert.ok(body.data.every((u) => u.role === "tutor"));
+  });
+
+  await check("an invalid role filter is rejected (400)", async () => {
+    assert.equal((await api("/api/admin/users?role=wizard", { token: admin })).status, 400);
+  });
+
+  await check("an admin cannot change their own role (400)", async () => {
+    const { status } = await api(`/api/admin/users/${docs.admin._id}/role`, {
+      method: "PATCH",
+      token: admin,
+      body: { role: "student" },
+    });
+    assert.equal(status, 400);
+  });
+
+  await check("an invalid role value is rejected (400)", async () => {
+    const { status } = await api(`/api/admin/users/${docs.student2._id}/role`, {
+      method: "PATCH",
+      token: admin,
+      body: { role: "wizard" },
+    });
+    assert.equal(status, 400);
+  });
+
+  await check("a role change for an unknown user → 404", async () => {
+    const { status } = await api(
+      `/api/admin/users/${new mongoose.Types.ObjectId()}/role`,
+      { method: "PATCH", token: admin, body: { role: "student" } }
+    );
+    assert.equal(status, 404);
+  });
+
+  await check("the role change takes effect on the next request", async () => {
+    const promoted = await api(`/api/admin/users/${docs.student2._id}/role`, {
+      method: "PATCH",
+      token: admin,
+      body: { role: "tutor" },
+    });
+    assert.equal(promoted.status, 200);
+    assert.equal(promoted.body.data.role, "tutor");
+
+    // Same token as before: the guard must follow the database, not the payload.
+    assert.equal((await api("/api/auth/me", { token: student2 })).body.user.role, "tutor");
+    assert.equal((await api("/api/applications/student", { token: student2 })).status, 403);
+
+    // Put it back so the remaining checks can use this account as a student.
+    const restored = await api(`/api/admin/users/${docs.student2._id}/role`, {
+      method: "PATCH",
+      token: admin,
+      body: { role: "student" },
+    });
+    assert.equal(restored.status, 200);
+  });
+
+  let moderationId;
+  await check("an admin approves a pending listing and it becomes public", async () => {
+    const created = await api("/api/tuitions", {
+      method: "POST",
+      token: tutor2,
+      body: tuitionBody({ title: "Verify Moderation Batch", subject: "Chemistry" }),
+    });
+    assert.equal(created.status, 201);
+    moderationId = created.body.data._id;
+
+    const queue = await api("/api/admin/tuitions?approvalStatus=pending&limit=50", {
+      token: admin,
+    });
+    assert.ok(queue.body.data.some((t) => t._id === moderationId));
+    assert.ok(queue.body.data.every((t) => t.approvalStatus === "pending"));
+
+    assert.equal((await api(`/api/tuitions/${moderationId}`)).status, 404);
+
+    const approved = await api(`/api/admin/tuitions/${moderationId}/status`, {
+      method: "PATCH",
+      token: admin,
+      body: { approvalStatus: "approved" },
+    });
+    assert.equal(approved.status, 200);
+    assert.equal((await api(`/api/tuitions/${moderationId}`)).status, 200);
+  });
+
+  await check("an admin rejects it and it disappears from the catalogue", async () => {
+    const rejected = await api(`/api/admin/tuitions/${moderationId}/status`, {
+      method: "PATCH",
+      token: admin,
+      body: { approvalStatus: "rejected" },
+    });
+    assert.equal(rejected.status, 200);
+    assert.equal((await api(`/api/tuitions/${moderationId}`)).status, 404);
+  });
+
+  await check("a non-admin cannot moderate a listing (403)", async () => {
+    const { status } = await api(`/api/admin/tuitions/${moderationId}/status`, {
+      method: "PATCH",
+      token: tutor1,
+      body: { approvalStatus: "approved" },
+    });
+    assert.equal(status, 403);
+  });
+
+  await check("an invalid approvalStatus filter is rejected (400)", async () => {
+    const { status } = await api("/api/admin/tuitions?approvalStatus=maybe", {
+      token: admin,
+    });
+    assert.equal(status, 400);
+  });
+
+  await check("the student dashboard stats match their list", async () => {
+    const stats = await api("/api/dashboard/stats", { token: student });
+    const list = await api("/api/applications/student", { token: student });
+
+    assert.equal(stats.body.data.role, "student");
+    assert.equal(stats.body.data.totalApplications, list.body.data.length);
+    assert.equal(
+      stats.body.data.pendingApplications,
+      list.body.data.filter((a) => a.status === "pending").length
+    );
+  });
+
+  await check("the tutor dashboard stats match their lists", async () => {
+    const stats = await api("/api/dashboard/stats", { token: tutor1 });
+    const mine = await api("/api/tuitions/mine", { token: tutor1 });
+    const applicants = await api("/api/applications/tutor", { token: tutor1 });
+
+    assert.equal(stats.body.data.totalTuitions, mine.body.data.length);
+    assert.equal(stats.body.data.totalApplicants, applicants.body.data.length);
+  });
+
+  await check("the admin dashboard stats are counts with no revenue", async () => {
+    const { status, body } = await api("/api/dashboard/stats", { token: admin });
+
+    assert.equal(status, 200);
+    assert.equal(body.data.role, "admin");
+    assert.ok(body.data.totalUsers >= 5);
+    assert.ok(body.data.totalTutors >= 1);
+    assert.equal(body.data.revenue, undefined);
+  });
+
+  await check("dashboard stats need a token (401)", async () => {
+    assert.equal((await api("/api/dashboard/stats")).status, 401);
   });
 
   // ── Search + misc ─────────────────────────────────────────────────────────
