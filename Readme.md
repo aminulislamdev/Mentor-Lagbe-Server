@@ -77,6 +77,32 @@ and the decided business rules.
 Implemented so far: auth check, tuition browse/search/pagination, tutor tuition
 CRUD with the free-plan limit, and the full application flow.
 
+## Demo data
+
+```bash
+npm run seed                  # accounts (client must be running) + 12 tuitions + 5 applications
+npm run seed -- --skip-users  # tuition data only, for accounts that already exist
+npm run seed:reset            # remove everything the seed created
+```
+
+Accounts are created through BetterAuth's sign-up endpoint, because only
+BetterAuth can hash a password — an inserted user document could never log in.
+So start the client first, then run the seed. Re-running is safe: the script
+deletes only its own rows (matching the emails below) before inserting.
+
+| Role | Email | Password |
+| :--- | :--- | :--- |
+| Admin | `admin@mentorlagbe.com` | `mentorlagbe123` |
+| Tutor (Pro) | `tutor.tanvir@mentorlagbe.com` | `mentorlagbe123` |
+| Tutor (Free) | `tutor.samia@mentorlagbe.com` | `mentorlagbe123` |
+| Student | `student.tasnim@mentorlagbe.com` | `mentorlagbe123` |
+
+The 12 tuitions cover Mathematics, Physics, Chemistry, Biology, English, IELTS,
+Programming and Accounting; 10 are approved, one is pending and one rejected, so
+the moderation queue and the tutor dashboard both have something to show. The
+five applications connect the demo students to those listings with a mix of
+pending, accepted and rejected states.
+
 ## Deployment
 
 - [ ] Live API URL: `<add after deploy>`

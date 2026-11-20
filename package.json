@@ -7,7 +7,9 @@
     "dev": "nodemon index.js",
     "start": "node index.js",
     "test": "node --test --test-isolation=none \"tests/*.test.mjs\"",
-    "verify": "node tests/verify-api.mjs"
+    "verify": "node tests/verify-api.mjs",
+    "seed": "node scripts/seed.js",
+    "seed:reset": "node scripts/seed.js --reset"
   },
   "keywords": [],
   "author": "",
