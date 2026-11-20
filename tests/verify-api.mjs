@@ -692,6 +692,73 @@ try {
     assert.equal(removed.status, 200);
   });
 
+  // ── Fee filters + sort ────────────────────────────────────────────────────
+  // Inserted directly because tutor1 is already at the free-plan limit.
+  await tuitions.insertMany(
+    [
+      { title: "Verify Fee Low", monthlyFee: 1200 },
+      { title: "Verify Fee Mid", monthlyFee: 3500 },
+      { title: "Verify Fee High", monthlyFee: 9000 },
+    ].map((fixture) => ({
+      ...tuitionBody(fixture),
+      tutorEmail: TEST_EMAILS[2],
+      tutorName: "Verify Tutor Two",
+      approvalStatus: "approved",
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }))
+  );
+
+  await check("minFee keeps only listings at or above it", async () => {
+    const { body } = await api("/api/tuitions?minFee=4000&limit=50");
+    assert.ok(body.data.length > 0);
+    assert.ok(body.data.every((t) => t.monthlyFee >= 4000));
+  });
+
+  await check("maxFee keeps only listings at or below it", async () => {
+    const { body } = await api("/api/tuitions?maxFee=2000&limit=50");
+    assert.ok(body.data.length > 0);
+    assert.ok(body.data.every((t) => t.monthlyFee <= 2000));
+  });
+
+  await check("a fee range selects just the middle listing", async () => {
+    const { body } = await api("/api/tuitions?minFee=3000&maxFee=4000&limit=50");
+    const titles = body.data.map((t) => t.title);
+    assert.ok(titles.includes("Verify Fee Mid"));
+    assert.ok(!titles.includes("Verify Fee Low"));
+    assert.ok(!titles.includes("Verify Fee High"));
+  });
+
+  await check("sort=fee_asc orders by fee ascending", async () => {
+    const { body } = await api("/api/tuitions?sort=fee_asc&limit=50");
+    const fees = body.data.map((t) => t.monthlyFee);
+    assert.deepEqual(fees, [...fees].sort((a, b) => a - b));
+  });
+
+  await check("sort=fee_desc orders by fee descending", async () => {
+    const { body } = await api("/api/tuitions?sort=fee_desc&limit=50");
+    const fees = body.data.map((t) => t.monthlyFee);
+    assert.deepEqual(fees, [...fees].sort((a, b) => b - a));
+  });
+
+  await check("an unknown sort value is rejected (400)", async () => {
+    const { status, body } = await api("/api/tuitions?sort=cheapest");
+    assert.equal(status, 400);
+    assert.match(body.error, /sort must be one of/);
+  });
+
+  await check("a non-numeric minFee is rejected (400)", async () => {
+    const { status } = await api("/api/tuitions?minFee=cheap");
+    assert.equal(status, 400);
+  });
+
+  await check("maxFee below minFee is rejected (400)", async () => {
+    const { status, body } = await api("/api/tuitions?minFee=5000&maxFee=1000");
+    assert.equal(status, 400);
+    assert.match(body.error, /greater than or equal to minFee/);
+  });
+
   // ── Search + misc ─────────────────────────────────────────────────────────
   await check("search matching finds the created batch", async () => {
     const { status, body } = await api("/api/tuitions?search=verification");
