@@ -16,6 +16,10 @@ let base;
 
 before(async () => {
   const app = express();
+  app.use(express.json());
+
+  // A route that only succeeds when the JSON body parsed.
+  app.post("/echo", (req, res) => res.json({ success: true, data: req.body }));
 
   // One route per error type the handler must recognise.
   app.get("/api-error", () => {
@@ -108,6 +112,17 @@ test("a duplicate key becomes a 409 naming the field", async () => {
     error: "Duplicate value",
     fields: ["email"],
   });
+});
+
+test("malformed JSON becomes a 400, not a 500", async () => {
+  const res = await fetch(`${base}/echo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{not valid json",
+  });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { success: false, error: "Invalid JSON body" });
 });
 
 test("an unknown error is a 500 that never leaks the message", async () => {

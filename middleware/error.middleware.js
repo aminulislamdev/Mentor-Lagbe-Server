@@ -36,7 +36,18 @@ export function errorHandler(error, req, res, next) {
     });
   }
 
-  // 2. Mongoose schema validation (required field, enum, min/max).
+  // 2. Errors raised by Express' own middleware before a route ran.
+  //    Express' JSON parser throws a SyntaxError with status 400 here; without
+  //    this branch a client sending broken JSON would wrongly see a 500.
+  if (error.type === "entity.parse.failed") {
+    return res.status(400).json({ success: false, error: "Invalid JSON body" });
+  }
+
+  if (error.expose && Number.isInteger(error.status) && error.status >= 400 && error.status < 500) {
+    return res.status(error.status).json({ success: false, error: error.message });
+  }
+
+  // 3. Mongoose schema validation (required field, enum, min/max).
   if (error.name === "ValidationError") {
     return res.status(400).json({
       success: false,
@@ -45,7 +56,7 @@ export function errorHandler(error, req, res, next) {
     });
   }
 
-  // 3. Mongoose could not cast a value (usually a malformed ObjectId).
+  // 4. Mongoose could not cast a value (usually a malformed ObjectId).
   if (error.name === "CastError") {
     return res.status(400).json({
       success: false,
@@ -53,7 +64,7 @@ export function errorHandler(error, req, res, next) {
     });
   }
 
-  // 4. MongoDB unique index violation (duplicate email, etc.).
+  // 5. MongoDB unique index violation (duplicate email, etc.).
   if (error.code === 11000) {
     return res.status(409).json({
       success: false,
@@ -62,7 +73,7 @@ export function errorHandler(error, req, res, next) {
     });
   }
 
-  // 5. Unknown: log the real cause, tell the client nothing about internals.
+  // 6. Unknown: log the real cause, tell the client nothing about internals.
   console.error("Unhandled error:", error);
   return res.status(500).json({ success: false, error: "Internal server error" });
 }
