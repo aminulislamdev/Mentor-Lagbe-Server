@@ -258,4 +258,34 @@ router.patch("/:id", authMiddleware, verifyTutor, async (req, res) => {
   }
 });
 
+// DELETE /api/tuitions/:id — Owner deletes own tuition
+router.delete("/:id", authMiddleware, verifyTutor, async (req, res) => {
+  try {
+    const tuitionId = req.params.id;
+    const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+    if (!objectIdRegex.test(tuitionId)) {
+      return res.status(400).json({ success: false, error: "Invalid tuition ID format" });
+    }
+
+    const tuition = await Tuition.findById(tuitionId);
+    if (!tuition) {
+      return res.status(404).json({ success: false, error: "Tuition not found" });
+    }
+
+    if (tuition.tutorEmail !== req.dbUser.email) {
+      return res.status(403).json({ success: false, error: "Forbidden: You do not own this tuition" });
+    }
+
+    await Tuition.deleteOne({ _id: tuitionId });
+
+    res.json({
+      success: true,
+      message: "Tuition deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting tuition:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 export default router;
