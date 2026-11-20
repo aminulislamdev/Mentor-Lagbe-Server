@@ -2,27 +2,27 @@
 //
 // The Express server verifies JWTs against BetterAuth's JWKS endpoint. This
 // script stands in for the Next app's /api/auth/jwks (port 3000) with its own
-// Ed25519 key pair, mints tokens for three test roles, and then exercises every
+// Ed25519 key pair, mints tokens for the test roles, and then exercises every
 // endpoint — including the authenticated 201/200 paths that a browser-less
 // environment otherwise cannot reach.
 //
 // It writes only throwaway data (emails starting with "verify.") and removes it
-// at the end. Admin moderation is not built yet (Task 6), so where an approval
-// is needed it is applied directly in MongoDB and labelled as such.
+// at the end. Where a listing must already be approved before the moderation
+// routes are exercised, the status is set directly in MongoDB and labelled.
 //
 // Usage:  node tests/verify-api.mjs        (Express server must be running)
 
-import http from "node:http";
 import assert from "node:assert/strict";
-import { createHash, createPrivateKey } from "node:crypto";
-import { importJWK, SignJWT } from "jose";
 import mongoose from "mongoose";
 import "dotenv/config";
+import {
+  privateKey,
+  rogueKey,
+  startJwksServer,
+  signToken,
+} from "./helpers/test-auth.mjs";
 
 const API = process.env.API_URL || "http://localhost:8000";
-const ISSUER = process.env.JWT_ISSUER || "http://localhost:3000";
-const AUDIENCE = process.env.JWT_AUDIENCE || "http://localhost:3000";
-const JWKS_PORT = 3000;
 
 const results = [];
 async function check(label, fn) {
@@ -37,43 +37,7 @@ async function check(label, fn) {
 }
 
 // ── 1. A stand-in for BetterAuth's JWKS endpoint ────────────────────────────
-//
-// The Ed25519 key is derived from a fixed string, so every run signs with the
-// same key. That matters because jose caches the JWKS inside the API process:
-// a fresh random key on each run would be rejected until that cache expires.
-// It is a throwaway test key, not a credential.
-function testKeyPair(seedString) {
-  const seed = createHash("sha256").update(seedString).digest();
-  // Standard Ed25519 PKCS#8 wrapper around a 32-byte seed.
-  const pkcs8 = Buffer.concat([
-    Buffer.from("302e020100300506032b657004220420", "hex"),
-    seed,
-  ]);
-  const privateJwk = createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" }).export({
-    format: "jwk",
-  });
-  return {
-    privateJwk,
-    publicJwk: { kty: privateJwk.kty, crv: privateJwk.crv, x: privateJwk.x },
-  };
-}
-
-const mainKeys = testKeyPair("mentorlagbe-api-verification-key");
-const rogueKeys = testKeyPair("mentorlagbe-rogue-key");
-const privateKey = await importJWK(mainKeys.privateJwk, "EdDSA");
-const rogueKey = await importJWK(rogueKeys.privateJwk, "EdDSA");
-const jwk = { ...mainKeys.publicJwk, alg: "EdDSA", use: "sig", kid: "verify-key" };
-
-const jwksServer = http.createServer((req, res) => {
-  if (req.url === "/api/auth/jwks") {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ keys: [jwk] }));
-    return;
-  }
-  res.writeHead(404);
-  res.end();
-});
-await new Promise((resolve) => jwksServer.listen(JWKS_PORT, resolve));
+const jwksServer = await startJwksServer();
 
 // Fail fast with a useful message when the API is not running, instead of
 // reporting 40 mysterious failures.
@@ -135,20 +99,6 @@ for (const person of people) {
   };
   const { insertedId } = await users.insertOne(doc);
   docs[person.as] = { _id: insertedId, ...doc };
-}
-
-function signToken(
-  user,
-  { key = privateKey, issuer = ISSUER, audience = AUDIENCE, expiresIn = "1h", subject } = {}
-) {
-  return new SignJWT({ role: user.role })
-    .setProtectedHeader({ alg: "EdDSA", kid: "verify-key" })
-    .setSubject(subject ?? String(user._id))
-    .setIssuer(issuer)
-    .setAudience(audience)
-    .setIssuedAt()
-    .setExpirationTime(expiresIn)
-    .sign(key);
 }
 
 const student = await signToken(docs.student);
@@ -1007,6 +957,65 @@ try {
   await check("dashboard stats need a token (401)", async () => {
     assert.equal((await api("/api/dashboard/stats")).status, 401);
   });
+
+  // ── Upload ────────────────────────────────────────────────────────────────
+  async function uploadRequest(token, formData) {
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const res = await fetch(`${API}/api/upload`, { method: "POST", headers, body: formData });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  }
+
+  // A 1×1 transparent PNG.
+  const pngBytes = Buffer.from(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489" +
+      "0000000a49444154789c6300010000050001" +
+      "0d0a2db40000000049454e44ae426082",
+    "hex"
+  );
+
+  await check("upload needs a token (401)", async () => {
+    const form = new FormData();
+    form.append("image", new Blob([pngBytes], { type: "image/png" }), "pixel.png");
+    assert.equal((await uploadRequest(undefined, form)).status, 401);
+  });
+
+  await check("upload without a file → 400", async () => {
+    const { status, body } = await uploadRequest(student, new FormData());
+    assert.equal(status, 400);
+    assert.match(body.error, /image file is required/);
+  });
+
+  await check("upload rejects a non-image file (400)", async () => {
+    const form = new FormData();
+    form.append("image", new Blob(["hello"], { type: "text/plain" }), "notes.txt");
+
+    const { status, body } = await uploadRequest(student, form);
+    assert.equal(status, 400);
+    assert.match(body.error, /image must be one of/);
+  });
+
+  await check("upload rejects a file over 5 MB (400)", async () => {
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(6 * 1024 * 1024)], { type: "image/png" }), "big.png");
+
+    const { status, body } = await uploadRequest(student, form);
+    assert.equal(status, 400);
+    assert.match(body.error, /5 MB or smaller/);
+  });
+
+  // Only with a stub configured (tests/imgbb-stub.mjs), so a normal run never
+  // pushes a test image into the project's real ImgBB account.
+  if (process.env.IMGBB_API_URL) {
+    await check("a valid image is uploaded and a hosted URL returned (201)", async () => {
+      const form = new FormData();
+      form.append("image", new Blob([pngBytes], { type: "image/png" }), "pixel.png");
+
+      const { status, body } = await uploadRequest(student, form);
+      assert.equal(status, 201, `upload answered ${status}: ${JSON.stringify(body)}`);
+      assert.match(body.data.url, /^https?:\/\//);
+      assert.ok(body.data.thumb);
+    });
+  }
 
   // ── Search + misc ─────────────────────────────────────────────────────────
   await check("search matching finds the created batch", async () => {
