@@ -66,14 +66,19 @@ GET {CLIENT_URL}/api/auth/token      →  { "token": "<jwt>" }   (requires the s
 ```
 
 Role checks always read `users.role` from MongoDB (`req.dbUser`), never the token
-payload — a demoted user loses access immediately.
+payload — a demoted user loses access immediately, even with an unexpired token.
 
 | Guard | Allows |
 | :--- | :--- |
-| `authMiddleware` | any signed-in user |
+| `verifyToken` | any signed-in user |
 | `verifyStudent` | `role === "student"` |
 | `verifyTutor` | `role === "tutor"` |
 | `verifyAdmin` | `role === "admin"` |
+
+`verifyToken` is the Express middleware. The cryptographic check itself is
+`verifyJwt` in `utils/jwt.js`; it rejects a bad signature, a foreign issuer or
+audience, and an expired token. A token whose `sub` is not a 24-character
+ObjectId, or whose user no longer exists, is rejected as well.
 
 ---
 

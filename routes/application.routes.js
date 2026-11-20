@@ -2,7 +2,7 @@ import express from "express";
 import Application from "../models/application.model.js";
 import Tuition from "../models/tuition.model.js";
 import {
-  authMiddleware,
+  verifyToken,
   verifyStudent,
   verifyTutor,
 } from "../middleware/auth.middleware.js";
@@ -24,7 +24,7 @@ const TUTOR_DECISIONS = ["accepted", "rejected"];
  * snapshotted onto the application so the student's ledger stays readable even
  * if the tutor later edits or deletes the listing.
  */
-router.post("/", authMiddleware, verifyStudent, async (req, res) => {
+router.post("/", verifyToken, verifyStudent, async (req, res) => {
   const { tuitionId, studentPhone, preferredSchedule, studentNote } = req.body ?? {};
 
   if (!isObjectId(tuitionId)) {
@@ -89,7 +89,7 @@ router.post("/", authMiddleware, verifyStudent, async (req, res) => {
  * ---------------------------------------
  * Every application the signed-in student has submitted, newest first.
  */
-router.get("/student", authMiddleware, verifyStudent, async (req, res) => {
+router.get("/student", verifyToken, verifyStudent, async (req, res) => {
   const applications = await Application.find({ studentEmail: req.dbUser.email })
     .select("-__v")
     .sort({ appliedAt: -1 });
@@ -103,7 +103,7 @@ router.get("/student", authMiddleware, verifyStudent, async (req, res) => {
  * Applicants across all of this tutor's tuitions, newest first.
  * Optional filter: ?tuitionId=<id>
  */
-router.get("/tutor", authMiddleware, verifyTutor, async (req, res) => {
+router.get("/tutor", verifyToken, verifyTutor, async (req, res) => {
   const filter = { tutorEmail: req.dbUser.email };
 
   if (req.query.tuitionId) {
@@ -127,7 +127,7 @@ router.get("/tutor", authMiddleware, verifyTutor, async (req, res) => {
  * Only the tutor who owns the tuition may decide. Re-sending the current
  * status is treated as a no-op success so the UI can retry safely.
  */
-router.patch("/:id/status", authMiddleware, verifyTutor, async (req, res) => {
+router.patch("/:id/status", verifyToken, verifyTutor, async (req, res) => {
   const decision = requireOneOf((req.body ?? {}).status, "status", TUTOR_DECISIONS);
 
   if (!isObjectId(req.params.id)) {
@@ -159,7 +159,7 @@ router.patch("/:id/status", authMiddleware, verifyTutor, async (req, res) => {
  * ---------------------------------------
  * Students may withdraw only while the application is still pending.
  */
-router.delete("/:id", authMiddleware, verifyStudent, async (req, res) => {
+router.delete("/:id", verifyToken, verifyStudent, async (req, res) => {
   if (!isObjectId(req.params.id)) {
     throw new ApiError(400, "Invalid application ID format");
   }

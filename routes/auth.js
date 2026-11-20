@@ -1,5 +1,5 @@
 import express from "express";
-import { authMiddleware } from "../middleware/auth.middleware.js";
+import { verifyToken } from "../middleware/auth.middleware.js";
 import User from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -12,7 +12,7 @@ const app = express.Router();
  * that answers with { user } instead of the standard { data } envelope, so the
  * client can tell "who am I" apart from a list response.
  */
-app.get("/me", authMiddleware, async (req, res) => {
+app.get("/me", verifyToken, async (req, res) => {
   const user = await User.findById(req.userId).select(
     "name email role plan image phone bio createdAt"
   );

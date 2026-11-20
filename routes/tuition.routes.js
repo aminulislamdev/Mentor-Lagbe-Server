@@ -1,6 +1,6 @@
 import express from "express";
 import Tuition from "../models/tuition.model.js";
-import { authMiddleware, verifyTutor } from "../middleware/auth.middleware.js";
+import { verifyToken, verifyTutor } from "../middleware/auth.middleware.js";
 import { ok, okWithMessage } from "../utils/respond.js";
 import {
   isObjectId,
@@ -118,7 +118,7 @@ router.get("/", async (req, res) => {
 
 // GET /api/tuitions/mine — Tutor's own listings, including pending/rejected/closed
 // NOTE: declared before "/:id", otherwise Express reads "mine" as an ObjectId.
-router.get("/mine", authMiddleware, verifyTutor, async (req, res) => {
+router.get("/mine", verifyToken, verifyTutor, async (req, res) => {
   const tuitions = await Tuition.find({ tutorEmail: req.dbUser.email })
     .select("-__v")
     .sort({ createdAt: -1 });
@@ -146,7 +146,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST /api/tuitions — Tutor creates tuition (free plan limit applies)
-router.post("/", authMiddleware, verifyTutor, async (req, res) => {
+router.post("/", verifyToken, verifyTutor, async (req, res) => {
   const body = req.body ?? {};
   const tutorName = req.dbUser.name;
   const tutorEmail = req.dbUser.email;
@@ -195,7 +195,7 @@ router.post("/", authMiddleware, verifyTutor, async (req, res) => {
 });
 
 // PATCH /api/tuitions/:id — Owner updates own tuition
-router.patch("/:id", authMiddleware, verifyTutor, async (req, res) => {
+router.patch("/:id", verifyToken, verifyTutor, async (req, res) => {
   if (!isObjectId(req.params.id)) {
     throw new ApiError(400, "Invalid tuition ID format");
   }
@@ -225,7 +225,7 @@ router.patch("/:id", authMiddleware, verifyTutor, async (req, res) => {
 });
 
 // DELETE /api/tuitions/:id — Owner deletes own tuition
-router.delete("/:id", authMiddleware, verifyTutor, async (req, res) => {
+router.delete("/:id", verifyToken, verifyTutor, async (req, res) => {
   if (!isObjectId(req.params.id)) {
     throw new ApiError(400, "Invalid tuition ID format");
   }

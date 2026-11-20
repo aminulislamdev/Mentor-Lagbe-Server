@@ -1,4 +1,4 @@
-import { verifyToken } from "../utils/jwt.js";
+import { verifyJwt } from "../utils/jwt.js";
 import User from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -6,26 +6,30 @@ import { ApiError } from "../utils/ApiError.js";
 const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
 /**
- * authMiddleware — the `verifyToken` step.
- * -----------------
+ * verifyToken — the first middleware of every protected route.
+ * -----------------------------------------------------------
  * Reads the Bearer token, verifies it against BetterAuth's JWKS, validates the
  * userId, loads the user from MongoDB and exposes it as `req.dbUser`.
  *
  * Failures go to the central error handler, so every rejection keeps the
  * standard { success: false, error } shape.
  */
-export async function authMiddleware(req, res, next) {
+export async function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return next(new ApiError(401, "Unauthorized: No token provided"));
   }
 
-  const token = authHeader.split(" ")[1];
+  const token = authHeader.slice("Bearer ".length).trim();
+
+  if (!token) {
+    return next(new ApiError(401, "Unauthorized: No token provided"));
+  }
 
   let payload;
   try {
-    payload = await verifyToken(token);
+    payload = await verifyJwt(token);
   } catch {
     return next(new ApiError(401, "Unauthorized: Invalid or expired token"));
   }
@@ -61,7 +65,7 @@ export async function authMiddleware(req, res, next) {
 /**
  * verifyStudent / verifyTutor / verifyAdmin
  * ----------------------------------------
- * Role guards that must run after authMiddleware. They trust only the current
+ * Role guards that must run after verifyToken. They trust only the current
  * role from the database, never the JWT payload.
  */
 export function verifyStudent(req, res, next) {
