@@ -292,4 +292,207 @@ router.post(
   }
 );
 
+// PATCH /api/tuitions/:id
+// Protected endpoint for tutors to update their own tuition post.
+// Only the tutor who owns the tuition can update it.
+//
+// Path parameter:
+//   id - MongoDB ObjectId of the tuition
+//
+// Body parameters (all optional):
+//   title         - Tuition title
+//   subject       - Subject name
+//   classLevel    - Class level
+//   mode          - "Online" or "Offline"
+//   location      - Location
+//   monthlyFee    - Monthly fee (number)
+//   daysPerWeek   - Days per week (number)
+//   bannerImage   - Banner image URL
+//   description   - Tuition description
+//
+// Protected fields (never updated by tutor):
+//   _id, tutorName, tutorEmail (ownership)
+//   approvalStatus (admin-controlled)
+//   createdAt, updatedAt (system timestamps)
+router.patch(
+  "/:id",
+  authMiddleware,
+  verifyTutor,
+  async (req, res) => {
+    try {
+      const tuitionId = req.params.id;
+
+      // --- Validate MongoDB ObjectId format ---
+      const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+      if (!objectIdRegex.test(tuitionId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid tuition ID format",
+        });
+      }
+
+      // --- Extract update fields from body ---
+      const {
+        title,
+        subject,
+        classLevel,
+        mode,
+        location,
+        monthlyFee,
+        daysPerWeek,
+        bannerImage,
+        description,
+      } = req.body;
+
+      // --- Build update object with only allowed fields ---
+      const updateFields = {};
+
+      if (title !== undefined) {
+        if (typeof title !== "string" || !title.trim()) {
+          return res.status(400).json({
+            success: false,
+            error: "title must be a non-empty string",
+          });
+        }
+        updateFields.title = title.trim();
+      }
+
+      if (subject !== undefined) {
+        if (typeof subject !== "string" || !subject.trim()) {
+          return res.status(400).json({
+            success: false,
+            error: "subject must be a non-empty string",
+          });
+        }
+        updateFields.subject = subject.trim();
+      }
+
+      if (classLevel !== undefined) {
+        if (typeof classLevel !== "string" || !classLevel.trim()) {
+          return res.status(400).json({
+            success: false,
+            error: "classLevel must be a non-empty string",
+          });
+        }
+        updateFields.classLevel = classLevel.trim();
+      }
+
+      if (mode !== undefined) {
+        const normalizedMode =
+          mode.charAt(0).toUpperCase() + mode.slice(1).toLowerCase();
+        if (normalizedMode !== "Online" && normalizedMode !== "Offline") {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid mode. Must be "Online" or "Offline".',
+          });
+        }
+        updateFields.mode = normalizedMode;
+      }
+
+      if (location !== undefined) {
+        if (typeof location !== "string" || !location.trim()) {
+          return res.status(400).json({
+            success: false,
+            error: "location must be a non-empty string",
+          });
+        }
+        updateFields.location = location.trim();
+      }
+
+      if (monthlyFee !== undefined) {
+        const monthlyFeeNum = Number(monthlyFee);
+        if (isNaN(monthlyFeeNum) || monthlyFeeNum < 0) {
+          return res.status(400).json({
+            success: false,
+            error: "monthlyFee must be a non-negative number",
+          });
+        }
+        updateFields.monthlyFee = monthlyFeeNum;
+      }
+
+      if (daysPerWeek !== undefined) {
+        const daysPerWeekNum = Number(daysPerWeek);
+        if (
+          isNaN(daysPerWeekNum) ||
+          daysPerWeekNum < 1 ||
+          daysPerWeekNum > 7
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: "daysPerWeek must be a number between 1 and 7",
+          });
+        }
+        updateFields.daysPerWeek = daysPerWeekNum;
+      }
+
+      if (bannerImage !== undefined) {
+        if (typeof bannerImage !== "string" || !bannerImage.trim()) {
+          return res.status(400).json({
+            success: false,
+            error: "bannerImage must be a non-empty string",
+          });
+        }
+        updateFields.bannerImage = bannerImage.trim();
+      }
+
+      if (description !== undefined) {
+        if (typeof description !== "string" || !description.trim()) {
+          return res.status(400).json({
+            success: false,
+            error: "description must be a non-empty string",
+          });
+        }
+        updateFields.description = description.trim();
+      }
+
+      // --- Reject empty update requests ---
+      if (Object.keys(updateFields).length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "No valid fields provided to update",
+        });
+      }
+
+      // --- Find the tuition by ID ---
+      const tuition = await Tuition.findById(tuitionId);
+
+      if (!tuition) {
+        return res.status(404).json({
+          success: false,
+          error: "Tuition not found",
+        });
+      }
+
+      // --- Verify ownership ---
+      // Never trust frontend-provided tutor ID; use the authenticated
+      // tutor's email from the database to check ownership.
+      if (tuition.tutorEmail !== req.dbUser.email) {
+        return res.status(403).json({
+          success: false,
+          error: "Forbidden: You do not own this tuition",
+        });
+      }
+
+      // --- Update only allowed fields ---
+      const updatedTuition = await Tuition.findByIdAndUpdate(
+        tuitionId,
+        { $set: updateFields },
+        { new: true, runValidators: true }
+      ).select("-__v");
+
+      res.json({
+        success: true,
+        message: "Tuition updated successfully",
+        data: updatedTuition,
+      });
+    } catch (error) {
+      console.error("Error updating tuition:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+      });
+    }
+  }
+);
+
 export default router;
