@@ -280,6 +280,93 @@ try {
     assert.equal(restored.status, 200);
   });
 
+  // ── Profile ───────────────────────────────────────────────────────────────
+  await check("a user can update their own profile (200)", async () => {
+    const { status, body } = await api("/api/users/me", {
+      method: "PATCH",
+      token: student,
+      body: {
+        name: "Verify Student Renamed",
+        phone: "01712345678",
+        bio: "HSC 2026, Dhaka",
+        image: "https://example.com/avatar.png",
+      },
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data.name, "Verify Student Renamed");
+    assert.equal(body.data.bio, "HSC 2026, Dhaka");
+  });
+
+  await check("the change is visible on GET /api/auth/me", async () => {
+    const { body } = await api("/api/auth/me", { token: student });
+    assert.equal(body.user.name, "Verify Student Renamed");
+    assert.equal(body.user.image, "https://example.com/avatar.png");
+  });
+
+  await check("the profile route cannot change role or plan", async () => {
+    const { status } = await api("/api/users/me", {
+      method: "PATCH",
+      token: student,
+      body: { role: "admin", plan: "pro" },
+    });
+    assert.equal(status, 400);
+
+    const me = await api("/api/auth/me", { token: student });
+    assert.equal(me.body.user.role, "student");
+    assert.equal(me.body.user.plan, "free");
+  });
+
+  await check("an image that is not an http(s) URL is rejected", async () => {
+    const { status } = await api("/api/users/me", {
+      method: "PATCH",
+      token: student,
+      body: { image: "javascript:alert(1)" },
+    });
+    assert.equal(status, 400);
+  });
+
+  await check("a name shorter than two characters is rejected", async () => {
+    const { status } = await api("/api/users/me", {
+      method: "PATCH",
+      token: student,
+      body: { name: "X" },
+    });
+    assert.equal(status, 400);
+  });
+
+  await check("an empty profile patch is rejected", async () => {
+    const { status } = await api("/api/users/me", {
+      method: "PATCH",
+      token: student,
+      body: {},
+    });
+    assert.equal(status, 400);
+  });
+
+  await check("a profile update without a token → 401", async () => {
+    const { status } = await api("/api/users/me", {
+      method: "PATCH",
+      body: { name: "Anonymous" },
+    });
+    assert.equal(status, 401);
+  });
+
+  await check("a tutor and an admin can update their own profile too", async () => {
+    const asTutor = await api("/api/users/me", {
+      method: "PATCH",
+      token: tutor1,
+      body: { bio: "Physics mentor" },
+    });
+    assert.equal(asTutor.status, 200);
+
+    const asAdmin = await api("/api/users/me", {
+      method: "PATCH",
+      token: admin,
+      body: { bio: "Platform moderator" },
+    });
+    assert.equal(asAdmin.status, 200);
+  });
+
   // ── Tuition create + validation ───────────────────────────────────────────
   await check("POST /api/tuitions rejects missing fields", async () => {
     const { status, body } = await api("/api/tuitions", {
