@@ -12,23 +12,26 @@ import userRoutes from "./routes/user.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
+import paymentRoutes from "./routes/payment.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js";
 
-// cors() defaults to "*" when the origin is undefined, which would silently open
-// the API to every site. Fall back to the dev origin and say so out loud instead.
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
 if (!process.env.CLIENT_URL) {
   console.warn("⚠️  CLIENT_URL is not set — CORS is limited to", CLIENT_URL);
 }
 
 const app = express();
-// Do not advertise the framework in every response.
 app.disable("x-powered-by");
 app.use(cors({ origin: CLIENT_URL, credentials: true }));
+
+//webhook
+app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
+
+// JSON body parser
 app.use(express.json());
 
 // home route
-app.get('/',(req, res) => {
+app.get('/', (req, res) => {
   res.send('MentorLagbe Server is running!');
 });
 
@@ -37,26 +40,29 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "MentorLagbe Server is running!" });
 });
 
-// Auth routes (protected test endpoint)
+// Auth routes
 app.use("/api/auth", authRoutes);
 
-// Tuition routes (public reads + tutor-protected writes)
+// Tuition routes
 app.use("/api/tuitions", tuitionRoutes);
 
-// Application routes (student submits, tutor decides)
+// Application routes
 app.use("/api/applications", applicationRoutes);
 
-// Profile routes (update own account)
+// Profile routes
 app.use("/api/users", userRoutes);
 
-// Admin routes (user roles, tuition moderation) — admin only, guarded in the file
+// Admin routes
 app.use("/api/admin", adminRoutes);
 
-// Dashboard statistics, shaped by the caller's role
+// Dashboard statistics
 app.use("/api/dashboard", dashboardRoutes);
 
-// Image uploads (multipart → ImgBB → hosted URL)
+// Image uploads
 app.use("/api/upload", uploadRoutes);
+
+// Payment routes (webhook already handled above, but router has both)
+app.use("/api/payments", paymentRoutes);
 
 // No route matched → JSON 404
 app.use(notFound);
