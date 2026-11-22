@@ -309,6 +309,7 @@ async function removeDemoData(db) {
     $or: [{ studentEmail: { $in: DEMO_EMAILS } }, { tutorEmail: { $in: DEMO_EMAILS } }],
   });
   await tuitions.deleteMany({ tutorEmail: { $in: DEMO_EMAILS } });
+  await db.collection("payments").deleteMany({ userEmail: { $in: DEMO_EMAILS } });
 
   // Remove the BetterAuth rows too, otherwise a re-seeded account inherits a
   // stale session and an orphaned credential record.
@@ -332,7 +333,7 @@ async function createAccounts() {
     try {
       const response = await fetch(`${CLIENT_URL}/api/auth/sign-up/email`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Origin: CLIENT_URL },
         body: JSON.stringify({
           name: person.name,
           email: person.email,
@@ -376,6 +377,7 @@ async function main() {
     users: db.collection("users"),
     tuitions: db.collection("tuitions"),
     applications: db.collection("applications"),
+    payments: db.collection("payments"),
   };
 
   if (RESET_ONLY) {
@@ -395,12 +397,10 @@ async function main() {
 
     // BetterAuth only takes role and plan at sign-up for role; plan is set here.
     for (const person of DEMO_USERS) {
-      if (person.plan !== "free") {
-        await collections.users.updateOne(
-          { email: person.email },
-          { $set: { plan: person.plan } }
-        );
-      }
+      await collections.users.updateOne(
+        { email: person.email },
+        { $set: { role: person.role, ...(person.plan !== "free" ? { plan: person.plan } : {}) } }
+      );
     }
   }
 
@@ -441,6 +441,40 @@ async function main() {
 
   await collections.applications.insertMany(applicationDocs);
   console.log(`Inserted ${applicationDocs.length} applications.`);
+
+  const paymentDocs = [
+    {
+      userEmail: TUTOR_TANVIR,
+      userName: "Tanvir Ahmed",
+      userRole: "tutor",
+      planName: "Tutor Pro",
+      amount: 15,
+      currency: "usd",
+      transactionId: "pi_3Qk7sL2eZvKYlo2C0mNtP9wT",
+      stripeSessionId: "cs_test_tanvir_pro_seed",
+      paymentStatus: "paid",
+      paidAt: new Date(now - 2 * 24 * 60 * 60 * 1000),
+      createdAt: new Date(now - 2 * 24 * 60 * 60 * 1000),
+      updatedAt: new Date(now - 2 * 24 * 60 * 60 * 1000),
+    },
+    {
+      userEmail: TUTOR_NAFIS,
+      userName: "Nafis Kamal",
+      userRole: "tutor",
+      planName: "Tutor Pro",
+      amount: 15,
+      currency: "usd",
+      transactionId: "pi_3Qk8tM3fZwLZmp3D1nOuQ0xU",
+      stripeSessionId: "cs_test_nafis_pro_seed",
+      paymentStatus: "paid",
+      paidAt: new Date(now - 5 * 24 * 60 * 60 * 1000),
+      createdAt: new Date(now - 5 * 24 * 60 * 60 * 1000),
+      updatedAt: new Date(now - 5 * 24 * 60 * 60 * 1000),
+    },
+  ];
+
+  await collections.payments.insertMany(paymentDocs);
+  console.log(`Inserted ${paymentDocs.length} payment records.`);
 
   console.log(`\nDone. Accounts use the password: ${PASSWORD}`);
   for (const person of DEMO_USERS) {
