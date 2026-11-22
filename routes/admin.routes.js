@@ -1,6 +1,9 @@
 import express from "express";
+import mongoose from "mongoose"; // ✅ BetterAuth collections অ্যাক্সেস করার জন্য যোগ করা হয়েছে
 import User from "../models/user.model.js";
 import Tuition from "../models/tuition.model.js";
+import Payment from "../models/payment.model.js";
+import Application from "../models/application.model.js";
 import { verifyToken, verifyAdmin } from "../middleware/auth.middleware.js";
 import {
   isObjectId,
@@ -47,11 +50,59 @@ router.get("/users", async (req, res) => {
     .skip(skip)
     .limit(limit);
 
+  const mapped = users.map((u) => ({
+    id: u._id.toString(),
+    _id: u._id.toString(),
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    plan: u.plan,
+    image: u.image,
+    phone: u.phone,
+    createdAt: u.createdAt,
+  }));
+
   res.json({
     success: true,
-    data: users,
+    data: mapped,
     pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
   });
+});
+
+/**
+ * DELETE /api/admin/users/:id
+ * ---------------------------
+ * Removes a user and cleans up their tuitions and applications.
+ * Also cleans up BetterAuth sessions and accounts to prevent orphaned data.
+ * An admin cannot delete their own account.
+ */
+router.delete("/users/:id", async (req, res) => {
+  if (!isObjectId(req.params.id)) {
+    throw new ApiError(400, "Invalid user ID format");
+  }
+
+  if (req.params.id === req.userId) {
+    throw new ApiError(400, "You cannot delete your own account");
+  }
+
+  const user = await User.findById(req.params.id);
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  // ✅ BetterAuth এর সেশন এবং অ্যাকাউন্ট ডিলিট করা (Orphaned Data প্রতিরোধ করতে)
+  const db = mongoose.connection.db;
+  const userObjectId = new mongoose.Types.ObjectId(req.params.id);
+  await db.collection("sessions").deleteMany({ userId: userObjectId });
+  await db.collection("accounts").deleteMany({ userId: userObjectId });
+
+  await User.deleteOne({ _id: req.params.id });
+  await Tuition.deleteMany({ tutorEmail: user.email });
+  await Application.deleteMany({
+    $or: [{ studentEmail: user.email }, { tutorEmail: user.email }],
+  });
+
+  okWithMessage(res, `User ${user.name} removed successfully`);
 });
 
 /**
@@ -151,6 +202,75 @@ router.patch("/tuitions/:id/status", async (req, res) => {
   }
 
   okWithMessage(res, `Tuition ${approvalStatus}`, tuition);
+});
+
+// GET /api/admin/transactions — Payment ledger for admin
+router.get("/transactions", async (req, res) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const filter = {};
+
+  if (req.query.search) {
+    const pattern = searchPattern(String(req.query.search).trim());
+    filter.$or = [
+      { userEmail: pattern },
+      { userName: pattern },
+      { planName: pattern },
+    ];
+  }
+
+  const total = await Payment.countDocuments(filter);
+  const transactions = await Payment.find(filter)
+    .sort({ paidAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .select("userEmail userName userRole planName amount currency transactionId stripeSessionId paymentStatus paidAt createdAt");
+
+  res.json({
+    success: true,
+    data: transactions,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  });
+});
+
+/**
+ * GET /api/admin/applications?status=&search=&page=&limit=
+ * --------------------------------------------------------
+ * Admin application management: every application across all tuitions.
+ */
+router.get("/applications", async (req, res) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const filter = {};
+
+  if (req.query.status) {
+    filter.status = req.query.status;
+  }
+  if (req.query.search) {
+    const pattern = searchPattern(String(req.query.search).trim());
+    filter.$or = [
+      { studentName: pattern },
+      { studentEmail: pattern },
+      { tutorEmail: pattern },
+      { tuitionTitle: pattern },
+      { subject: pattern },
+    ];
+  }
+
+  const total = await Application.countDocuments(filter);
+  const applications = await Application.find(filter)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+
+  res.json({
+    success: true,
+    data: applications,
+    pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+  });
 });
 
 export default router;
