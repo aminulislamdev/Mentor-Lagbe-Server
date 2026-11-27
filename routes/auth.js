@@ -14,7 +14,7 @@ const app = express.Router();
  */
 app.get("/me", verifyToken, async (req, res) => {
   const user = await User.findById(req.userId).select(
-    "name email role plan image phone bio createdAt"
+    "name email role plan image phone bio createdAt settings"
   );
 
   if (!user) {
@@ -32,6 +32,7 @@ app.get("/me", verifyToken, async (req, res) => {
       phone: user.phone,
       bio: user.bio,
       createdAt: user.createdAt,
+      settings: user.settings ?? null,
     },
   });
 });
