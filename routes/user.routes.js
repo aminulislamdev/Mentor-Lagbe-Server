@@ -10,14 +10,21 @@ const router = express.Router();
 /**
  * PATCH /api/users/me  (any signed-in user)
  * ----------------------------------------
- * Body: { name?, phone?, bio?, image? }
+ * Body: { name?, phone?, bio?, image?, settings? }
  *
- * Only four fields are accepted. `role`, `plan` and `email` are deliberately
- * absent: promotion, subscription tier and login identity are not self-service.
- * An unknown field is ignored, so a request carrying only `role` ends up with
- * nothing to update and is rejected.
- *
+ * Profile fields: only name, phone, bio, image. `role`, `plan`, `email`, `_id`
+ * and auth fields are deliberately absent (not self-service); unknown fields are
+ * ignored, so a request carrying only `role` ends up with nothing and is rejected.
  * phone, bio and image may be cleared by sending an empty string.
+ *
+ * `settings` is optional and partial. Only these keys are allowed (anything else
+ * is rejected with 400); only supplied fields are changed; nothing else in
+ * `settings` is touched. Uses MongoDB `$set` with dot notation:
+ *   settings.language, settings.timezone, settings.mode, settings.days,
+ *   settings.evenings, settings.notifications.{applicant,status,approval,
+ *   announcements,subscription}
+ * Types are validated; invalid values return 400. Unknown notifications keys
+ * are rejected. Protected fields cannot be updated.
  */
 router.patch("/me", verifyToken, async (req, res) => {
   const body = req.body ?? {};
@@ -49,6 +56,60 @@ router.patch("/me", verifyToken, async (req, res) => {
     updateFields.image = image;
   }
 
+  // ── Partial settings update (whitelist; $set dot-notation; no mass assignment) ──
+  if (body.settings !== undefined) {
+    const settings = body.settings;
+
+    if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
+      throw new ApiError(400, "settings must be an object");
+    }
+
+    const SETTINGS_KEYS = ["language", "timezone", "mode", "days", "evenings", "notifications"];
+    for (const key of Object.keys(settings)) {
+      if (!SETTINGS_KEYS.includes(key)) {
+        throw new ApiError(400, `Unknown settings field: ${key}`);
+      }
+    }
+
+    if (settings.language !== undefined) {
+      updateFields["settings.language"] = requireString(settings.language, "settings.language");
+    }
+    if (settings.timezone !== undefined) {
+      updateFields["settings.timezone"] = requireString(settings.timezone, "settings.timezone");
+    }
+    if (settings.mode !== undefined) {
+      updateFields["settings.mode"] = requireString(settings.mode, "settings.mode");
+    }
+    if (settings.days !== undefined) {
+      if (!Array.isArray(settings.days) || !settings.days.every((d) => typeof d === "string")) {
+        throw new ApiError(400, "settings.days must be an array of strings");
+      }
+      updateFields["settings.days"] = settings.days;
+    }
+    if (settings.evenings !== undefined) {
+      if (typeof settings.evenings !== "boolean") {
+        throw new ApiError(400, "settings.evenings must be a boolean");
+      }
+      updateFields["settings.evenings"] = settings.evenings;
+    }
+    if (settings.notifications !== undefined) {
+      const notifications = settings.notifications;
+      if (typeof notifications !== "object" || notifications === null || Array.isArray(notifications)) {
+        throw new ApiError(400, "settings.notifications must be an object");
+      }
+      const NOTIFICATION_KEYS = ["applicant", "status", "approval", "announcements", "subscription"];
+      for (const key of Object.keys(notifications)) {
+        if (!NOTIFICATION_KEYS.includes(key)) {
+          throw new ApiError(400, `Unknown settings.notifications field: ${key}`);
+        }
+        if (typeof notifications[key] !== "boolean") {
+          throw new ApiError(400, `settings.notifications.${key} must be a boolean`);
+        }
+        updateFields[`settings.notifications.${key}`] = notifications[key];
+      }
+    }
+  }
+
   if (Object.keys(updateFields).length === 0) {
     throw new ApiError(400, "No valid fields provided to update");
   }
@@ -59,7 +120,7 @@ router.patch("/me", verifyToken, async (req, res) => {
     req.userId,
     { $set: updateFields },
     { returnDocument: "after", runValidators: true }
-  ).select("name email role plan image phone bio createdAt");
+  ).select("name email role plan image phone bio createdAt settings");
 
   if (!user) {
     throw new ApiError(404, "User not found");
