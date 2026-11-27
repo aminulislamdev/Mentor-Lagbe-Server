@@ -4,10 +4,13 @@ import User from "../models/user.model.js";
 import Tuition from "../models/tuition.model.js";
 import Payment from "../models/payment.model.js";
 import Application from "../models/application.model.js";
+import Notification from "../models/notification.model.js";
 import { verifyToken, verifyAdmin } from "../middleware/auth.middleware.js";
 import {
   isObjectId,
   requireOneOf,
+  requireFields,
+  requireString,
   searchPattern,
   parsePagination,
 } from "../utils/validate.js";
@@ -202,6 +205,28 @@ router.patch("/tuitions/:id/status", async (req, res) => {
   }
 
   okWithMessage(res, `Tuition ${approvalStatus}`, tuition);
+});
+
+/**
+ * POST /api/admin/notifications
+ * -----------------------------
+ * Admin sends a notification. Body: { title, message, targetRole }.
+ * targetRole: "all" | "student" | "tutor".
+ * Only authenticated admins (verifyToken + verifyAdmin). Role/user id is read
+ * from the database (req.dbUser), never trusted from req.body.
+ */
+router.post("/notifications", async (req, res) => {
+  const body = req.body ?? {};
+
+  requireFields(body, ["title", "message", "targetRole"]);
+
+  const title = requireString(body.title, "title");
+  const message = requireString(body.message, "message");
+  const targetRole = requireOneOf(body.targetRole, "targetRole", ["all", "student", "tutor"]);
+
+  const notification = await Notification.create({ title, message, targetRole });
+
+  okWithMessage(res, "Notification sent", notification, 201);
 });
 
 // GET /api/admin/transactions — Payment ledger for admin
