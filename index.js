@@ -13,6 +13,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js";
 
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:3000";
@@ -63,6 +64,9 @@ app.use("/api/upload", uploadRoutes);
 
 // Payment routes (webhook already handled above, but router has both)
 app.use("/api/payments", paymentRoutes);
+
+// Notification routes
+app.use("/api/notifications", notificationRoutes);
 
 // No route matched → JSON 404
 app.use(notFound);
